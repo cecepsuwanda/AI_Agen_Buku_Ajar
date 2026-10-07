@@ -38,9 +38,47 @@ book:
     contoh, dan diakhiri latihan.
 
 pipeline:
-  # §27 mendefinisikan rantai 10 tahap; MVP hanya memiliki gate yang terisi.
+  # §27 mendefinisikan rantai 10 tahap; hanya gate yang terisi didaftarkan di sini.
   # Menambah gate baru = daftarkan di agents/gates.py + tambahkan namanya di sini.
+  #
+  # URUTAN PENTING dan tidak dapat ditukar. `validate_gates` menolak gate yang
+  # `produces`-nya tidak memajukan rantai §27, tetapi ia tidak dapat menolak
+  # gate yang urutannya keliru — gate seperti itu akan dilewati `can_advance`
+  # tanpa suara. Urutkan mengikuti rantai: contoh → latihan → fakta → sitasi →
+  # pedagogi → konsistensi → reviewer → latex → latex_qa.
   gates: [reviewer]
+
+# -----------------------------------------------------------------------------
+# RAG (§10, §13). Indeks dibangun perintah tersendiri: `ai-book ingest`.
+#
+#   enabled: false  →  NullResearcher dipakai kembali; paket riset ditandai
+#                      `degraded`, penulis dilarang mengutip, dan setiap klaim
+#                      faktual wajib muncul di `unresolved_claims`. Ini keadaan
+#                      yang jujur, bukan keadaan yang rusak.
+# -----------------------------------------------------------------------------
+rag:
+  enabled: true
+  chunk_chars: 1200          # potongan ~1200 karakter, dipotong pada batas paragraf
+  chunk_overlap: 200         # kalimat definisi jarang jatuh tepat di tengah potongan
+  top_k: 8                   # bukti per bab yang diserahkan ke Research Agent
+  ocr_min_chars_per_page: 80 # di bawah ini, PDF dianggap hasil scan → jalur vision
+
+# -----------------------------------------------------------------------------
+# LaTeX (§25, §26)
+# -----------------------------------------------------------------------------
+latex:
+  enabled: true
+  engine: latexmk            # bukan pdflatex langsung: latexmk tahu berapa kali harus diulang
+  template_dir: null         # null = pakai latex/templates/ bawaan
+  timeout_s: 180             # bab + daftar pustaka pada mesin ini selesai jauh di bawah ini
+  keep_aux: false            # .aux/.log adalah turunan; simpan hanya saat menelusuri masalah
+
+# -----------------------------------------------------------------------------
+# Knowledge graph (§14)
+# -----------------------------------------------------------------------------
+graph:
+  enabled: true
+  max_depth: 8               # batas lintasan penelusuran; graf dari ringkasan bab dapat bersiklus
 
 # -----------------------------------------------------------------------------
 # Pemetaan peran → model (blueprint §6). Agent memanggil router.chat("writer"),
@@ -113,3 +151,5 @@ paths:
   input: input
   state: state
   output: output
+  knowledge: knowledge       # TURUNAN: indeks vektor + graf konsep. Boleh dihapus,
+                             # dibangun ulang dengan `ai-book ingest`.

@@ -85,6 +85,61 @@ class PipelineConfig(FrozenModel):
     gates: tuple[str, ...] = ("reviewer",)
 
 
+class RagConfig(FrozenModel):
+    """Retrieval-augmented generation (§10, §13).
+
+    ``enabled: false`` adalah keadaan yang sah dan **bukan** keadaan yang rusak:
+    ``NullResearcher`` tetap menjadi researcher yang jujur. Yang tidak boleh
+    terjadi adalah diam-diam menyalakan RAG pada indeks yang belum dibangun —
+    karena itu ``ingest`` adalah perintah tersendiri, bukan efek samping ``run``.
+    """
+
+    enabled: bool = True
+    #: Ukuran potongan dalam karakter, bukan token: model embedding yang dipakai
+    #: (``nomic-embed-text``) memotong pada 2048 token, dan karakter adalah satuan
+    #: yang dapat dihitung tanpa pustaka tokenizer tambahan.
+    chunk_chars: int = Field(default=1200, ge=200, le=8000)
+    #: Tumpang tindih antar-potongan. Tanpa ini, kalimat yang jatuh tepat di batas
+    #: potongan hilang dari kedua sisi, dan itulah kalimat yang paling sering
+    #: memuat definisi.
+    chunk_overlap: int = Field(default=200, ge=0, le=2000)
+    top_k: int = Field(default=8, ge=1, le=50)
+    #: Di bawah ambang ini, sebuah PDF dianggap hasil scan dan dialihkan ke jalur
+    #: OCR (§10). Rata-rata karakter per halaman pada PDF teks biasa jauh di atas
+    #: angka ini; pada PDF hasil scan nilainya mendekati nol.
+    ocr_min_chars_per_page: int = Field(default=80, ge=0)
+
+
+class LatexConfig(FrozenModel):
+    """Pembangkit & pemeriksa LaTeX (§25, §26)."""
+
+    enabled: bool = True
+    #: ``latexmk`` dipakai alih-alih ``pdflatex`` langsung karena ia yang tahu
+    #: berapa kali harus dijalankan ulang: rujukan silang dan daftar pustaka baru
+    #: konvergen setelah dua-tiga lintasan, dan menjalankannya sekali menghasilkan
+    #: PDF dengan tanda tanya di tempat nomor seharusnya.
+    engine: str = "latexmk"
+    #: Direktori template. ``None`` berarti memakai template bawaan di
+    #: ``latex/templates/``; argumen ``--latex-template`` (§42) mengisinya dari
+    #: ``input/source_latex/``.
+    template_dir: str | None = None
+    timeout_s: float = Field(default=180.0, gt=0)
+    #: Berkas bantu (``.aux``, ``.log``, …) adalah turunan yang dapat dibangun
+    #: ulang, dan menyimpannya membuat setiap diff berisik. Disimpan hanya saat
+    #: menelusuri masalah kompilasi.
+    keep_aux: bool = False
+
+
+class GraphConfig(FrozenModel):
+    """Knowledge graph konsep (§14)."""
+
+    enabled: bool = True
+    #: Batas panjang lintasan saat menelusuri prasyarat. Graf yang dibangun dari
+    #: ringkasan bab dapat memuat siklus ("A memakai B", "B dijelaskan lewat A");
+    #: batas ini membuat penelusurannya berhenti dengan sendirinya.
+    max_depth: int = Field(default=8, ge=1, le=50)
+
+
 class PathsConfig(FrozenModel):
     """Jalur relatif terhadap root project (masih ``str`` — konversi di container)."""
 
@@ -92,6 +147,10 @@ class PathsConfig(FrozenModel):
     input: str = "input"
     state: str = "state"
     output: str = "output"
+    #: Basis pengetahuan turunan: indeks vektor (§13) dan graf konsep (§14).
+    #: Dapat dihapus dan dibangun ulang kapan saja dari ``input/`` — itulah
+    #: sebabnya ia bukan ``state/``.
+    knowledge: str = "knowledge"
 
 
 class AppConfig(FrozenModel):
@@ -104,6 +163,9 @@ class AppConfig(FrozenModel):
     book: BookDefaults = Field(default_factory=BookDefaults)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    rag: RagConfig = Field(default_factory=RagConfig)
+    latex: LatexConfig = Field(default_factory=LatexConfig)
+    graph: GraphConfig = Field(default_factory=GraphConfig)
 
     #: Bahan mentah ``profiles`` — diteruskan apa adanya ke
     #: :meth:`models.model_registry.ModelRegistry.from_sources`, yang memegang
@@ -140,6 +202,10 @@ ENV_PATHS: Mapping[str, tuple[str, ...]] = {
     "BUKUAJAR_REVIEW_THRESHOLD": ("book", "review_threshold"),
     "BUKUAJAR_STATE_DIR": ("paths", "state"),
     "BUKUAJAR_OUTPUT_DIR": ("paths", "output"),
+    "BUKUAJAR_KNOWLEDGE_DIR": ("paths", "knowledge"),
+    "BUKUAJAR_RAG_ENABLED": ("rag", "enabled"),
+    "BUKUAJAR_RAG_TOP_K": ("rag", "top_k"),
+    "BUKUAJAR_LATEX_ENABLED": ("latex", "enabled"),
 }
 
 

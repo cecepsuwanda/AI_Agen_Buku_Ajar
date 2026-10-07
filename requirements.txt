@@ -7,7 +7,12 @@
 ollama==0.6.2              # SDK resmi Ollama (Client, AsyncClient, structured output)
 
 # --- Model domain & konfigurasi -------------------------------------------
-pydantic==2.12.5           # tipe domain beku + validasi output LLM
+# 2.13.5, bukan 2.12.5: `chromadb` menarik `kubernetes>=28.1.0`, dan kubernetes
+# 37.0.0 mensyaratkan `pydantic>=2.13.5`. Kita tidak memakai jalur terdistribusi
+# Chroma sama sekali (`PersistentClient` lokal, lihat rag/vector_store.py), tetapi
+# batas versi itu tetap berlaku di resolusi dependensi — dan menahannya di 2.12.5
+# berarti memasang kombinasi yang pip sendiri tandai tidak konsisten.
+pydantic==2.13.5           # tipe domain beku + validasi output LLM
 PyYAML==6.0.3              # baca config.yaml
 
 # --- Kontrak prompt --------------------------------------------------------
@@ -18,3 +23,14 @@ tenacity==9.1.4            # retry objek (bukan dekorator) untuk kegagalan trans
 typer==0.27.1              # CLI bertipe + CliRunner untuk tes offline
 rich==15.0.0               # tabel status & progres
 jsonlines==4.0.0           # log per-panggilan (§38)
+
+# --- Retrieval & ingestion (§10, §11, §13) ---------------------------------
+# Catatan: `pillow` SENGAJA TIDAK ADA. Halaman PDF diubah menjadi gambar oleh
+# `fitz.Pixmap.tobytes("png")`, yang sudah menghasilkan byte PNG/JPEG tanpa
+# bantuan pustaka lain; `pypdf` hanya menyebut Pillow sebagai extra opsional
+# (`image`/`full`) dan `PyMuPDF` tidak menyebutnya sama sekali. Menambahkannya
+# berarti memelihara satu pin untuk pustaka yang tidak pernah dipanggil.
+chromadb==1.5.9            # vector store tertanam — PersistentClient lokal (§13)
+pypdf==6.19.0              # ekstraksi teks per halaman PDF; nomor halaman WAJIB utuh (§10)
+PyMuPDF==1.28.2            # jalur OCR (§10: halaman → gambar) + ekstraksi gambar (§42)
+                           #   diimpor sebagai `pymupdf`; `fitz` sudah deprecated

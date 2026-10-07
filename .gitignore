@@ -233,6 +233,35 @@ state/
 *.tmp
 *.json.tmp
 
+# --- Basis pengetahuan turunan (§13, §14) ------------------------------------
+# Indeks vektor ChromaDB dan graf konsep. Keduanya dapat dibangun ulang dari
+# `input/` dengan `ai-book ingest`, persis seperti state/. Yang tidak boleh
+# terjadi adalah indeks 40 MB masuk ke Git dan setiap `ingest` menghasilkan diff
+# biner yang tidak dapat dibaca siapa pun.
+knowledge/
+
+# --- Berkas bantu LaTeX (§25, §26) -------------------------------------------
+# Turunan kompilasi: setiap `.tex` yang berubah menghasilkan ulang semuanya, dan
+# menyimpannya membuat diff berisik tanpa satu pun informasi. `*.log` sudah
+# tertutup di bagian "Django stuff" di atas — daftar ini melengkapinya.
+#
+# Sengaja DIBATASI pada `output/latex/`, bukan pola global `*.aux`. `input/`
+# adalah milik pengguna — blueprint §42 menyebut `input/source_latex/` sebagai
+# tempat template LaTeX yang disediakan dosen — dan pola global akan diam-diam
+# menutup berkas di sana yang mungkin justru ingin di-commit.
+#
+# Yang TIDAK di-ignore, dan itu disengaja (§39): `output/latex/**/*.tex`,
+# `references.bib`, dan `book.pdf` — ketiganya adalah hasil kerja.
+output/latex/**/*.aux
+output/latex/**/*.out
+output/latex/**/*.fls
+output/latex/**/*.fdb_latexmk
+output/latex/**/*.bbl
+output/latex/**/*.blg
+output/latex/**/*.toc
+output/latex/**/*.synctex.gz
+output/latex/**/*.xdv
+
 # --- CATATAN PENTING (§39) ---------------------------------------------------
 # output/ SENGAJA TIDAK di-ignore: source buku (Markdown hari ini, LaTeX nanti)
 # harus berada di Git agar revisi AI dapat dilacak per bab.

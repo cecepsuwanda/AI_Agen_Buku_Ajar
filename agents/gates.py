@@ -29,8 +29,9 @@ from typing import Callable
 
 from domain.chapter import ChapterRecord, ReviewResult
 from domain.enums import ChapterStatus
-from domain.errors import ConfigError
+from domain.errors import ConfigError, InvalidGateError
 from domain.ports import ModelProvider, PromptLibrary, Reporter, ReviewGate
+from domain.rules import validate_gates
 from domain.state import BookState
 
 
@@ -104,7 +105,19 @@ def build_gates(names: tuple[str, ...], context: GateContext) -> tuple[ReviewGat
     yang salah karena itu gagal **sebelum satu token pun dibakar** — jauh lebih
     baik daripada gagal di bab ke-7 setelah membayar enam bab.
 
-    :raises ConfigError: bila ada nama yang tidak terdaftar.
+    Dua jenis kesalahan diperiksa di sini, dan keduanya adalah kesalahan
+    konfigurasi, bukan kesalahan runtime:
+
+    1. Nama yang tidak terdaftar.
+    2. **``produces`` yang mundur atau keluar rantai** — diperiksa
+       :func:`~domain.rules.validate_gates`. Tanpa pemeriksaan ini, gate seperti
+       itu tidak gagal sama sekali: ``BookDirector._run_gates`` melewatinya
+       karena ``can_advance`` bernilai salah, dan babnya diam-diam tidak pernah
+       diperiksa oleh gate yang justru dimaksudkan untuk memeriksanya. Kegagalan
+       sunyi seperti itu jauh lebih mahal daripada pesan galat di baris pertama.
+
+    :raises ConfigError: bila ada nama yang tidak terdaftar, atau ``produces``
+        sebuah gate tidak memajukan rantai §27.
     """
     built: list[ReviewGate] = []
     for name in names:
@@ -116,7 +129,17 @@ def build_gates(names: tuple[str, ...], context: GateContext) -> tuple[ReviewGat
                 f"Gate yang tersedia: {known}"
             )
         built.append(factory(context))
-    return tuple(built)
+
+    gates = tuple(built)
+    try:
+        validate_gates(gates)
+    except InvalidGateError as exc:
+        raise ConfigError(
+            f"Gate {exc.gate!r} punya `produces` yang tidak memajukan rantai §27: "
+            f"{exc.source} → {exc.target}. Urutan di `pipeline.gates` harus maju, "
+            "karena gate yang mundur akan dilewati tanpa suara."
+        ) from exc
+    return gates
 
 
 # ---------------------------------------------------------------------------

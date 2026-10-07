@@ -102,6 +102,12 @@ class ProjectPaths:
     input: Path
     state: Path
     output: Path
+    #: Basis pengetahuan turunan — indeks vektor (§13) dan graf konsep (§14).
+    #: **Turunan, bukan sumber**: seluruh isinya dapat dibangun ulang dari
+    #: ``input/``, dan itulah sebabnya ia bukan bagian dari ``state/``. Kehilangan
+    #: ``state/`` berarti kehilangan pekerjaan; kehilangan ``knowledge/`` hanya
+    #: berarti menjalankan ``ingest`` sekali lagi.
+    knowledge: Path
     #: Akar sandbox ``--dry-run``: prompt, state, dan Markdown-nya semua di bawah
     #: sini. Bidang tersendiri — bukan properti turunan ``state`` — karena
     #: :meth:`for_dry_run`lah yang memindahkan ``state`` ke dalamnya, dan properti
@@ -117,6 +123,31 @@ class ProjectPaths:
     def book_markdown(self) -> Path:
         """Berkas buku gabungan (``output/book.md``)."""
         return self.output / "book.md"
+
+    @property
+    def vector_store_dir(self) -> Path:
+        """Indeks vektor ChromaDB (``knowledge/vector_db``, §13)."""
+        return self.knowledge / "vector_db"
+
+    @property
+    def graph_dir(self) -> Path:
+        """Graf konsep tersimpan (``knowledge/graph``, §14)."""
+        return self.knowledge / "graph"
+
+    @property
+    def latex_dir(self) -> Path:
+        """Sumber LaTeX dan PDF (``output/latex``, §25)."""
+        return self.output / "latex"
+
+    @property
+    def latex_chapters_dir(self) -> Path:
+        """Sumber LaTeX per bab (``output/latex/chapters``, §25)."""
+        return self.latex_dir / "chapters"
+
+    @property
+    def figures_dir(self) -> Path:
+        """Gambar yang diekstrak dari PDF referensi (``output/figures``, §42)."""
+        return self.output / "figures"
 
     @property
     def parse_fail_dir(self) -> Path:
@@ -142,6 +173,7 @@ class ProjectPaths:
             input=root / paths.input,
             state=root / paths.state,
             output=root / paths.output,
+            knowledge=root / paths.knowledge,
             sandbox=root / paths.state / SANDBOX_DIRNAME,
         )
 
@@ -216,7 +248,16 @@ class ProjectPaths:
         berkas: direktori keluaran yang tidak dapat dibuat adalah kegagalan
         sistemik, dan lebih baik ia muncul sebelum satu token pun dibelanjakan.
         """
-        for directory in (self.state, self.parse_fail_dir, self.output, self.chapters_dir):
+        for directory in (
+            self.state,
+            self.parse_fail_dir,
+            self.output,
+            self.chapters_dir,
+            self.latex_chapters_dir,
+            self.figures_dir,
+            self.vector_store_dir,
+            self.graph_dir,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
 
 
