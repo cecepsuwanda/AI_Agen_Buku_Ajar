@@ -1,0 +1,20 @@
+# Runtime dependencies — AI Agent Buku Ajar
+# Python 3.11 (lihat config.yaml & README)
+#
+# Di-install dengan:  pip install -r requirements.txt
+
+# --- LLM runtime -----------------------------------------------------------
+ollama==0.6.2              # SDK resmi Ollama (Client, AsyncClient, structured output)
+
+# --- Model domain & konfigurasi -------------------------------------------
+pydantic==2.12.5           # tipe domain beku + validasi output LLM
+PyYAML==6.0.3              # baca config.yaml
+
+# --- Kontrak prompt --------------------------------------------------------
+Jinja2==3.1.6              # render prompt (StrictUndefined)
+
+# --- Ketahanan & CLI -------------------------------------------------------
+tenacity==9.1.4            # retry objek (bukan dekorator) untuk kegagalan transien
+typer==0.27.1              # CLI bertipe + CliRunner untuk tes offline
+rich==15.0.0               # tabel status & progres
+jsonlines==4.0.0           # log per-panggilan (§38)

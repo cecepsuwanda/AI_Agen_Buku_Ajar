@@ -1,0 +1,11 @@
+# Dependencies untuk pengembangan & pengujian.
+# Di-install dengan:  pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest==9.0.2
+pytest-asyncio==1.3.0
+pytest-cov              # cakupan; pasang bila belum ada
+black==26.1.0
+mypy==1.19.1
+flake8==7.3.0

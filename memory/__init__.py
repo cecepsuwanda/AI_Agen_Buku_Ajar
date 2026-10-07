@@ -1,0 +1,1 @@
+"""Persistensi state dan checkpoint."""

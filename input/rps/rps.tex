@@ -1,0 +1,146 @@
+% Rencana Pembelajaran Semester (RPS)
+% Berkas ini adalah MASUKAN contoh untuk pipeline AI Agent Buku Ajar.
+%
+% Sengaja ditulis sebagai teks biasa, bukan LaTeX yang harus dikompilasi:
+% pada MVP ini RPS diperlakukan sebagai teks dan dikirim apa adanya ke Book
+% Planner. Parser terstruktur CPMK/Sub-CPMK menyusul di Tahap 4 tanpa
+% mengubah tipe BookRequest.
+
+\section*{Identitas Mata Kuliah}
+
+\begin{tabular}{ll}
+Mata Kuliah   & Algoritma dan Struktur Data \\
+Kode          & IF1234 \\
+SKS           & 3 SKS (2 teori, 1 praktikum) \\
+Semester      & 3 \\
+Program Studi & Informatika \\
+Prasyarat     & Dasar Pemrograman \\
+Dosen         & Tim Pengampu \\
+\end{tabular}
+
+\section*{Deskripsi Mata Kuliah}
+
+Mata kuliah ini membahas cara menyusun data agar operasi terhadapnya menjadi
+efisien, serta teknik-teknik algoritmik dasar untuk mengolahnya. Penekanan
+diberikan pada penalaran tentang biaya komputasi: mengapa satu rancangan
+struktur data lebih tepat daripada yang lain untuk persoalan tertentu, dan
+bagaimana memperkirakan biayanya sebelum menulis kode. Materi disampaikan
+dengan pendekatan analisis kompleksitas yang diikuti praktik implementasi,
+sehingga mahasiswa tidak sekadar menghafal struktur data tetapi mampu memilih
+dan membenarkan pilihannya.
+
+\section*{Capaian Pembelajaran Lulusan (CPL)}
+
+\begin{enumerate}
+  \item Mampu menerapkan pemikiran logis, kritis, sistematis, dan inovatif
+        dalam konteks pengembangan ilmu pengetahuan dan teknologi.
+  \item Mampu merancang, mengimplementasikan, dan menganalisis solusi
+        komputasi yang efisien untuk persoalan nyata.
+  \item Mampu mengomunikasikan gagasan teknis secara tertulis maupun lisan.
+\end{enumerate}
+
+\section*{Capaian Pembelajaran Mata Kuliah (CPMK)}
+
+\begin{enumerate}
+  \item CPMK-1: Mahasiswa mampu menganalisis kompleksitas waktu dan ruang
+        sebuah algoritma menggunakan notasi asimtotik.
+  \item CPMK-2: Mahasiswa mampu mengimplementasikan struktur data linear
+        (senarai, tumpukan, antrean) dan menjelaskan konsekuensi biaya setiap
+        operasinya.
+  \item CPMK-3: Mahasiswa mampu menerapkan struktur data pohon, termasuk
+        pohon pencarian biner dan pohon seimbang, untuk persoalan pencarian
+        dan pengurutan.
+  \item CPMK-4: Mahasiswa mampu memilih dan menerapkan teknik algoritmik
+        dasar (pengurutan, pencarian, rekursi, pemrograman dinamis) sesuai
+        karakteristik persoalan.
+  \item CPMK-5: Mahasiswa mampu menilai trade-off antara waktu, ruang, dan
+        kerumitan implementasi dalam memilih solusi.
+\end{enumerate}
+
+\section*{Sub-Capaian Pembelajaran Mata Kuliah (Sub-CPMK)}
+
+\begin{enumerate}
+  \item Sub-CPMK-1.1: Menjelaskan definisi O, Omega, dan Theta serta
+        menghitungnya pada potongan kode sederhana.
+  \item Sub-CPMK-2.1: Mengimplementasikan senarai berantai tunggal dan ganda
+        beserta operasi penyisipan dan penghapusan.
+  \item Sub-CPMK-2.2: Menjelaskan perbedaan perilaku tumpukan (LIFO) dan
+        antrean (FIFO) serta menerapkannya pada persoalan nyata.
+  \item Sub-CPMK-3.1: Menelusuri operasi pencarian dan penyisipan pada pohon
+        pencarian biner, termasuk kasus terburuknya.
+  \item Sub-CPMK-3.2: Menjelaskan mengapa pohon pencarian biner dapat menjadi
+        tidak seimbang dan bagaimana pohon seimbang mengatasinya.
+  \item Sub-CPMK-4.1: Membandingkan algoritma pengurutan dasar dan
+        menjelaskan kapan masing-masing tepat dipakai.
+  \item Sub-CPMK-4.2: Menerapkan rekursi dan pemrograman dinamis pada
+        persoalan yang memiliki sub-persoalan bertumpang tindih.
+  \item Sub-CPMK-5.1: Memberikan rekomendasi rancangan disertai alasan
+        kuantitatif terhadap pilihan struktur data pada studi kasus.
+\end{enumerate}
+
+\section*{Rencana Mingguan}
+
+\begin{enumerate}
+  \item Minggu 1 - Kontrak kuliah; pengantar struktur data dan mengapa
+        efisiensi diukur, bukan dirasakan.
+  \item Minggu 2 - Analisis kompleksitas: notasi asimtotik, analisis kasus
+        terburuk dan rata-rata, aturan penjumlahan dan perkalian.
+  \item Minggu 3 - Senarai berantai: representasi simpul, senarai tunggal,
+        senarai ganda, senarai melingkar; biaya penyisipan dan penghapusan.
+  \item Minggu 4 - Tumpukan: operasi, implementasi berbasis larik dan
+        senarai, penerapan pada evaluasi ekspresi dan penelusuran balik.
+  \item Minggu 5 - Antrean: antrean biasa, antrean melingkar, dan antrean
+        berprioritas; penerapan pada penjadwalan.
+  \item Minggu 6 - Pengantar pohon: istilah, representasi, penelusuran
+        preorder, inorder, dan postorder.
+  \item Minggu 7 - Pohon pencarian biner: pencarian, penyisipan, penghapusan,
+        dan kasus terburuk yang membuatnya linear.
+  \item Minggu 8 - Ujian Tengah Semester.
+  \item Minggu 9 - Pohon seimbang: AVL, rotasi, dan mengapa penyeimbangan
+        menjaga biaya operasi tetap logaritmik.
+  \item Minggu 10 - Antrean berprioritas dan tumpukan biner (heap):
+        penyisipan, penghapusan, dan pengurutan dengan heap.
+  \item Minggu 11 - Algoritma pengurutan dasar dan lanjut: gelembung,
+        seleksi, sisipan, gabung, cepat, dan perbandingan biayanya.
+  \item Minggu 12 - Tabel hash: fungsi hash, penanganan tabrakan dengan
+        perantaian dan pengalamatan terbuka, faktor beban.
+  \item Minggu 13 - Rekursi: relasi rekurens, kasus dasar versus kasus
+        rekursif, dan biaya pemanggilan bertingkat.
+  \item Minggu 14 - Pemrograman dinamis: memoization, penyelesaian
+        bertahap, dan contoh persoalan klasik.
+  \item Minggu 15 - Studi kasus terpadu: memilih struktur data untuk
+        persoalan nyata dan membenarkan pilihannya secara kuantitatif.
+  \item Minggu 16 - Ujian Akhir Semester.
+\end{enumerate}
+
+\section*{Metode Penilaian}
+
+\begin{tabular}{lll}
+Aktivitas              & Bobot & CPMK \\
+Tugas dan kuis         & 20\%  & CPMK-1, CPMK-2 \\
+Praktikum              & 25\%  & CPMK-2, CPMK-3, CPMK-4 \\
+Ujian Tengah Semester  & 25\%  & CPMK-1, CPMK-2 \\
+Ujian Akhir Semester   & 25\%  & CPMK-3, CPMK-4, CPMK-5 \\
+Ujian Praktik          & 5\%   & CPMK-4 \\
+\end{tabular}
+
+\section*{Referensi}
+
+\begin{enumerate}
+  \item Cormen, T. H., Leiserson, C. E., Rivest, R. L., \& Stein, C.
+        \emph{Introduction to Algorithms}. MIT Press.
+  \item Sedgewick, R., \& Wayne, K. \emph{Algorithms}. Addison-Wesley.
+  \item Weiss, M. A. \emph{Data Structures and Algorithm Analysis}.
+        Pearson.
+  \item Skiena, S. S. \emph{The Algorithm Design Manual}. Springer.
+\end{enumerate}
+
+\section*{Catatan Penyusunan Buku}
+
+Buku ajar yang disusun dari RPS ini ditujukan untuk mahasiswa semester tiga
+yang sudah menguasai dasar pemrograman prosedural. Setiap bab diharapkan
+memuat tujuan pembelajaran yang eksplisit, minimal tiga contoh bertingkat
+(dari yang langsung sampai yang menuntut penalaran), dan latihan yang
+menutup materi. Bab tidak boleh mengandalkan rujukan yang tidak tersedia
+secara terbuka, dan setiap angka kompleksitas yang disebut harus disertai
+alasan mengapa angka itu yang berlaku.

@@ -1,0 +1,212 @@
+"""Registri gate pipeline (§27) — jembatan antara rantai 10 tahap dan MVP.
+
+Blueprint §27 mendefinisikan rantai sepuluh status, sedangkan MVP ini hanya
+punya empat agent. Rantai itu tidak boleh diciutkan agar cocok dengan MVP —
+status yang dihapus hari ini harus dimigrasikan di seluruh ``state/*.json``
+besok. Karena itu rantai tetap utuh, dan tahap yang belum berpenghuni diisi
+oleh :class:`PassThroughGate`: gate yang tidak memanggil LLM, tidak memeriksa
+apa pun, dan **mencatat dirinya sebagai dilewati**.
+
+Itulah yang membuat ``BookDirector`` tidak perlu tahu gate mana yang ada. Ia
+mengulang daftar dari ``config.yaml`` dan memanggil ``evaluate`` pada setiap
+gate. Konsekuensinya (OCP, dalam bentuk yang dapat diperiksa):
+
+* Menambahkan pedagogy reviewer = berkas baru + satu baris di ``config.yaml``.
+  Nol suntingan pada ``book_director.py``, ``base.py``, atau agent mana pun.
+* Mengganti model peninjau = mengedit ``config.yaml``. Nol suntingan pada kode.
+
+**Registri ini ditulis sekali saat import, lalu hanya dibaca.** Ia memang
+``dict`` tingkat modul, tetapi bukan keadaan global yang termutasi di tengah
+proses — inilah bedanya, dan bedanya ditegakkan: nama yang sudah terdaftar
+tidak dapat didaftarkan ulang. Model yang patuh hari ini tidak boleh berubah
+perilakunya karena modul lain kebetulan di-import belakangan.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable
+
+from domain.chapter import ChapterRecord, ReviewResult
+from domain.enums import ChapterStatus
+from domain.errors import ConfigError
+from domain.ports import ModelProvider, PromptLibrary, Reporter, ReviewGate
+from domain.state import BookState
+
+
+@dataclass(frozen=True, slots=True)
+class GateContext:
+    """Segala yang mungkin dibutuhkan sebuah gate untuk dibangun.
+
+    Sebuah **objek konteks**, bukan daftar argumen yang bertambah panjang. Gate
+    pertama hanya butuh ``prompts``; gate LaTeX nanti akan butuh direktori
+    template; gate yang memakai RAG akan butuh embedder. Dengan konteks,
+    penambahan itu tidak mengubah signature factory mana pun yang sudah ada —
+    dan yang paling penting, tidak ada gate yang dipaksa menerima dependensi
+    yang tidak dipakainya (ISP).
+    """
+
+    router: ModelProvider
+    prompts: PromptLibrary
+    reporter: Reporter
+
+    #: Target panjang bab, dari ``config.yaml``. Diteruskan ke writer dan reviewer
+    #: supaya keduanya menilai terhadap angka yang sama.
+    min_words: int = 1200
+
+    #: Ambang skor kelulusan review. Ditegakkan :func:`~domain.rules.decide_review`.
+    review_threshold: int = 7
+
+    #: Batas percobaan perbaikan JSON, dari ``config.yaml``.
+    repair_attempts: int = 2
+
+
+#: Pembuat gate dari konteksnya.
+GateFactory = Callable[[GateContext], ReviewGate]
+
+
+_GATE_REGISTRY: dict[str, GateFactory] = {}
+
+
+def register_gate(name: str) -> Callable[[GateFactory], GateFactory]:
+    """Dekorator: daftarkan sebuah gate dengan ``name``.
+
+    :raises ConfigError: bila nama itu sudah terdaftar. Sengaja gagal keras —
+        dua gate dengan nama sama berarti salah satunya tidak akan pernah
+        dijalankan, dan itu jenis kesalahan yang tidak terlihat sampai
+        seseorang bertanya mengapa babnya tidak pernah diperiksa.
+
+    Dekoratornya mengembalikan factory apa adanya, sehingga fungsinya tetap
+    dapat dipanggil langsung dalam tes tanpa melewati registri.
+    """
+
+    def decorate(factory: GateFactory) -> GateFactory:
+        if name in _GATE_REGISTRY:
+            raise ConfigError(
+                f"Gate {name!r} sudah terdaftar. "
+                "Nama gate harus unik — pakai nama lain atau hapus yang lama."
+            )
+        _GATE_REGISTRY[name] = factory
+        return factory
+
+    return decorate
+
+
+def registered_gate_names() -> tuple[str, ...]:
+    """Nama seluruh gate yang terdaftar, terurut (untuk pesan kesalahan dan ``status``)."""
+    return tuple(sorted(_GATE_REGISTRY))
+
+
+def build_gates(names: tuple[str, ...], context: GateContext) -> tuple[ReviewGate, ...]:
+    """Bangun gate sesuai urutan ``names`` (§27).
+
+    Dipanggil composition root saat start, bukan saat import. Konfigurasi gate
+    yang salah karena itu gagal **sebelum satu token pun dibakar** — jauh lebih
+    baik daripada gagal di bab ke-7 setelah membayar enam bab.
+
+    :raises ConfigError: bila ada nama yang tidak terdaftar.
+    """
+    built: list[ReviewGate] = []
+    for name in names:
+        factory = _GATE_REGISTRY.get(name)
+        if factory is None:
+            known = ", ".join(registered_gate_names()) or "(tidak ada)"
+            raise ConfigError(
+                f"Gate {name!r} tidak terdaftar di pipeline.gates. "
+                f"Gate yang tersedia: {known}"
+            )
+        built.append(factory(context))
+    return tuple(built)
+
+
+# ---------------------------------------------------------------------------
+# Gate bawaan
+# ---------------------------------------------------------------------------
+class PassThroughGate:
+    """Memajukan rantai §27 tanpa memanggil LLM.
+
+    Setiap vonisnya ``approved=True`` **dan** ``skipped=True``. Bendera itu
+    penting dan bukan hiasan: tanpa ia, laporan akhir akan menyatakan bab ini
+    "diperiksa" padahal tidak ada yang memeriksanya. Bab yang lolos tanpa
+    pemeriksaan harus terlihat sebagai bab yang lolos tanpa pemeriksaan.
+
+    Catatan yang dibawanya menyebutkan bahwa tahap ini belum diimplementasikan,
+    sehingga pembaca ``state/chapterNN.json`` tahu persis apa yang terjadi.
+    """
+
+    def __init__(self, *, name: str, produces: ChapterStatus, note: str = "") -> None:
+        self.name = name
+        self.produces = produces
+        self._note = note or f"Tahap {produces} belum diimplementasikan pada MVP ini."
+
+    def evaluate(self, record: ChapterRecord, book: BookState) -> ReviewResult:
+        """Loloskan bab tanpa memeriksa apa pun, dan katakan demikian."""
+        del record, book
+        return ReviewResult(
+            gate=self.name,
+            approved=True,
+            score=10,
+            feedback=(self._note,),
+            skipped=True,
+        )
+
+
+def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
+    """Bangun factory pass-through untuk satu status.
+
+    Ditulis sebagai fungsi penghasil, bukan satu kelas per tahap: enam kelas
+    yang isinya identik hanya akan menyembunyikan bahwa semuanya memang
+    placeholder.
+    """
+
+    def factory(context: GateContext) -> ReviewGate:
+        del context
+        return PassThroughGate(name=name, produces=produces)
+
+    return factory
+
+
+#: Tahap §27 yang **belum** berpenghuni, dalam urutan rantai.
+#:
+#: Terdaftar sekarang meskipun belum ada di ``config.yaml``, supaya
+#: mengaktifkannya nanti benar-benar hanya satu baris konfigurasi:
+#:
+#:     pipeline:
+#:       gates: [fact_checked, citation_checked, reviewer]
+#:
+#: Ketika agent sungguhnya tiba (``fact_checker.py``), ia mendaftar dengan nama
+#: yang sama dan ``register_gate`` akan menolak — memaksa keputusan sadar
+#: "hapus placeholder ini", bukan diam-diam menimpa.
+PLACEHOLDER_GATES: tuple[tuple[str, ChapterStatus], ...] = (
+    ("fact_checked", ChapterStatus.FACT_CHECKED),
+    ("citation_checked", ChapterStatus.CITATION_CHECKED),
+    ("pedagogy_reviewed", ChapterStatus.PEDAGOGY_REVIEWED),
+    ("consistency_checked", ChapterStatus.CONSISTENCY_CHECKED),
+    ("latex_generated", ChapterStatus.LATEX_GENERATED),
+    ("latex_compiled", ChapterStatus.LATEX_COMPILED),
+)
+
+
+def _register_placeholders() -> None:
+    """Isi registri dengan seluruh tahap yang belum berpenghuni.
+
+    Ditulis sebagai fungsi, bukan loop di tingkat modul, supaya tidak ada nama
+    sementara (``_gate_name``) yang tertinggal di namespace paket ini — nama
+    seperti itu terlihat seperti keadaan global bagi siapa pun yang membaca.
+    """
+    for name, produces in PLACEHOLDER_GATES:
+        register_gate(name)(_passthrough_factory(name, produces))
+
+
+_register_placeholders()
+
+
+__all__ = [
+    "PLACEHOLDER_GATES",
+    "GateContext",
+    "GateFactory",
+    "PassThroughGate",
+    "build_gates",
+    "register_gate",
+    "registered_gate_names",
+]

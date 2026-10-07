@@ -218,3 +218,24 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# =============================================================================
+# AI Agent Buku Ajar
+# =============================================================================
+
+# --- State runtime / checkpoint (§28) ----------------------------------------
+# Turunan dan dapat dibangun ulang dari `run`. JANGAN di-commit.
+# Ini sekaligus menutup log per-panggilan §38 (`state/run.jsonl`), berkas prompt
+# `--dry-run`, dan bukti `state/parse_fail/` — ketiganya memang tinggal di sini,
+# jadi tidak perlu aturan terpisah yang justru menutup lebih luas dari maksudnya
+# (mis. `*.jsonl` akan diam-diam menutup berkas data JSONL di mana pun).
+state/
+*.tmp
+*.json.tmp
+
+# --- CATATAN PENTING (§39) ---------------------------------------------------
+# output/ SENGAJA TIDAK di-ignore: source buku (Markdown hari ini, LaTeX nanti)
+# harus berada di Git agar revisi AI dapat dilacak per bab.
+# Lihat blueprint §39 dan README.
+!output/
+!output/**

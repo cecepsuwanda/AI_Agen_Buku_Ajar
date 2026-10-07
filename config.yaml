@@ -1,0 +1,115 @@
+# =============================================================================
+# Konfigurasi AI Agent Buku Ajar
+#
+# Blueprint acuan: AI_Agen_Buku_Ajar_Python_Ollama_MultiLLM.md
+#   §6/§7  → agent tidak pernah menyebut nama model; selalu lewat ModelRouter
+#   §32    → bentuk blok `profiles`
+#
+# Preseden konfigurasi (lihat domain/config precedence di app/config.py):
+#   flag CLI  >  env BUKUAJAR_*  >  entri profil  >  default bawaan
+# =============================================================================
+
+schema_version: 1
+
+# Profil aktif bila tidak di-override lewat --profile / BUKUAJAR_PROFILE.
+profile: default
+
+ollama:
+  base_url: http://localhost:11434
+  request_timeout_s: 600     # longgar: model 671B dan cold-load lokal bisa lambat
+  warmup: true               # kirim 1 token saat start agar cold load (~41 s) tidak mengagetkan
+
+retry:
+  attempts: 3                # hanya untuk kegagalan transien (timeout / transport)
+  initial_backoff_s: 1.0
+  max_backoff_s: 8.0
+  repair_attempts: 2         # perbaikan JSON terstruktur (loop terbatas, bukan retry)
+
+book:
+  language: id
+  default_chapters: 8
+  max_revisions: 2
+  min_words_per_chapter: 1200
+  review_threshold: 7       # skor minimum agar bab dinyatakan lulus review
+  style_guide: >-
+    Bahasa Indonesia akademik formal. Istilah teknis dipertahankan dalam bahasa
+    Inggris pada kemunculan pertama, diikuti padanan Indonesianya dalam tanda
+    kurung. Setiap bab dibuka dengan tujuan pembelajaran, lalu penjelasan,
+    contoh, dan diakhiri latihan.
+
+pipeline:
+  # §27 mendefinisikan rantai 10 tahap; MVP hanya memiliki gate yang terisi.
+  # Menambah gate baru = daftarkan di agents/gates.py + tambahkan namanya di sini.
+  gates: [reviewer]
+
+# -----------------------------------------------------------------------------
+# Pemetaan peran → model (blueprint §6). Agent memanggil router.chat("writer"),
+# TIDAK PERNAH menuliskan nama model. Ganti model = edit file ini saja.
+# -----------------------------------------------------------------------------
+profiles:
+
+  # Jalur utama. Model besar/bernalar hanya dibayar di tempat yang tepat.
+  #
+  # CATATAN (diverifikasi `ai-book doctor`, 2026-10-07): `qwen3-coder:480b-cloud`
+  # dan `deepseek-v3.1:671b-cloud` masih muncul di /api/tags tetapi sudah
+  # di-RETIRE upstream (HTTP 410, "retired at 2026-07-15"). Keduanya diganti di
+  # bawah. Peran `reviewer` sengaja tetap dari keluarga BERBEDA dari `writer`:
+  # self-review sekeluarga itu berkorelasi dan menangkap lebih sedikit.
+  default:
+    planner:         {model: "deepseek-v4.1-flash:cloud", temperature: 0.3, max_tokens: 8192, num_ctx: 131072}
+    chapter_planner: {model: "gemma4:31b-cloud",          temperature: 0.3, max_tokens: 4096, num_ctx: 131072}
+    researcher:      {model: "gpt-oss:120b-cloud",        temperature: 0.1, max_tokens: 4096}
+    writer:          {model: "gemma4:31b-cloud",          temperature: 0.7, max_tokens: 8192, num_ctx: 131072}
+    reviewer:        {model: "gpt-oss:120b-cloud",        temperature: 0.1, max_tokens: 4096}
+    code:            {model: "gpt-oss:120b-cloud",        temperature: 0.2, max_tokens: 4096}
+    latex:           {model: "gpt-oss:120b-cloud",        temperature: 0.1, max_tokens: 8192}
+    vision:          {model: "gemma3:4b",                 temperature: 0.2}
+    embedding:       {model: "nomic-embed-text:latest"}
+
+  # Satu-satunya jalur yang DIJAMIN bekerja tanpa akun/cloud.
+  # Hanya gemma3:4b yang berjalan lokal; kualitasnya terbatas tetapi cukup
+  # untuk membuktikan pipeline berjalan ujung-ke-ujung.
+  #
+  # ANGGARAN TOKEN (diverifikasi `run --profile local` sungguhan, 2026-10-07):
+  # nilai awal (2048 untuk writer) MEMBUAT PIPELINE SELALU GAGAL dengan
+  # TruncatedOutputError — `book.min_words_per_chapter: 1200` tidak mungkin
+  # muat dalam 2048 token keluaran, sehingga babnya terpotong di tengah JSON.
+  # Angka di bawah diberi ruang untuk persyaratan yang sudah dinyatakan di
+  # berkas ini sendiri; `num_ctx: 32768` cukup untuk prompt + keluaran ini.
+  local:
+    planner:         {model: "gemma3:4b", temperature: 0.3, max_tokens: 4096, num_ctx: 32768}
+    chapter_planner: {model: "gemma3:4b", temperature: 0.3, max_tokens: 2048, num_ctx: 32768}
+    researcher:      {model: "gemma3:4b", temperature: 0.1, max_tokens: 1536, num_ctx: 32768}
+    writer:          {model: "gemma3:4b", temperature: 0.7, max_tokens: 6144, num_ctx: 32768}
+    reviewer:        {model: "gemma3:4b", temperature: 0.1, max_tokens: 2048, num_ctx: 32768}
+    code:            {model: "gemma3:4b", temperature: 0.2, max_tokens: 2048, num_ctx: 32768}
+    latex:           {model: "gemma3:4b", temperature: 0.1, max_tokens: 2048, num_ctx: 32768}
+    vision:          {model: "gemma3:4b", temperature: 0.2}
+    embedding:       {model: "nomic-embed-text:latest"}
+
+# -----------------------------------------------------------------------------
+# Metadata kapabilitas. Diverifikasi `ai-book doctor` terhadap /api/tags.
+#
+# PENTING (tereproduksi di mesin ini): model `thinking` dapat menghabiskan
+# seluruh anggaran token pada jejak penalaran sehingga `content` keluar KOSONG.
+# Karena itu `thinking: true` WAJIB diiringi max_tokens yang longgar, dan
+# `thinking: false` (mis. qwen3-coder) tidak boleh dikirimi parameter think.
+# -----------------------------------------------------------------------------
+models:
+  "deepseek-v4.1-flash:cloud": {thinking: true,  vision: true,  tools: true,  context_length: 1048576, is_remote: true}
+  "gemma4:31b-cloud":          {thinking: true,  vision: true,  tools: true,  context_length: 262144,  is_remote: true}
+  "gpt-oss:120b-cloud":        {thinking: true,  vision: false, tools: true,  context_length: 131072,  is_remote: true}
+  "gemma3:4b":                 {thinking: false, vision: true,  tools: false, context_length: 131072,  is_remote: false}
+  "nomic-embed-text:latest":   {thinking: false, vision: false, tools: false, context_length: 2048,    is_remote: false}
+  # Di-retire upstream 2026-07-15 (HTTP 410). Entri kapabilitasnya sengaja
+  # dihapus agar tidak ada yang mengira ia masih dapat dipakai:
+  #   qwen3-coder:480b-cloud, deepseek-v3.1:671b-cloud
+
+# -----------------------------------------------------------------------------
+# Jalur direktori (relatif terhadap root project)
+# -----------------------------------------------------------------------------
+paths:
+  prompts: prompts
+  input: input
+  state: state
+  output: output
