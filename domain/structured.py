@@ -268,7 +268,14 @@ def render_output_contract(model: type[BaseModel], *, indent: int = 2) -> str:
 
     lines = ["Objek JSON dengan field berikut (semuanya WAJIB ada):", ""]
     for name, spec in properties.items():
-        lines.append(f"  - {name}: {_describe_type(spec)}")
+        # ``description`` ikut dibaca dari skema, bukan ditulis ulang di sini:
+        # itu satu-satunya cara aturan yang hidup di samping tipe (mis. "judul
+        # tanpa awalan 'Bab N:'") sampai ke prompt tanpa dua tempat untuk
+        # menyimpang. Perhatikan bahwa ``strict_schema`` mengubah bentuk properti
+        # (anyOf, dsb.), jadi deskripsinya dicari di seluruh cabang.
+        hint = _first_description(spec)
+        suffix = f" — {hint}" if hint else ""
+        lines.append(f"  - {name}: {_describe_type(spec)}{suffix}")
     lines.append("")
     lines.append("Kerangka:")
     lines.append("")
@@ -276,6 +283,27 @@ def render_output_contract(model: type[BaseModel], *, indent: int = 2) -> str:
     lines.append(json.dumps(example_instance(schema), indent=indent, ensure_ascii=False))
     lines.append("```")
     return "\n".join(lines)
+
+
+def _first_description(spec: Mapping[str, Any]) -> str:
+    """Cari ``description`` pertama pada properti, termasuk di dalam ``anyOf``.
+
+    Pydantic menaruh deskripsi ``Field`` pada level properti, tetapi
+    ``strict_schema`` membungkus tipe opsional dan ber-default menjadi ``anyOf`` —
+    dan cabang yang membawa deskripsi belum tentu yang pertama. Karena itu seluruh
+    cabang ditelusuri, dan yang pertama ditemukan yang dipakai.
+    """
+    own = spec.get("description")
+    if isinstance(own, str) and own.strip():
+        return own.strip()
+
+    for branch in spec.get("anyOf", ()) or ():
+        if isinstance(branch, Mapping):
+            found = _first_description(branch)
+            if found:
+                return found
+
+    return ""
 
 
 def _describe_type(spec: Mapping[str, Any]) -> str:

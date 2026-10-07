@@ -64,7 +64,13 @@ class ChapterDraft(FrozenModel):
     menyamar sebagai fakta yang terdokumentasi.
     """
 
-    title: str = Field(min_length=1)
+    title: str = Field(
+        min_length=1,
+        description=(
+            "Judul bab saja, TANPA awalan 'Bab N:' — penomoran ditambahkan "
+            "perender, sehingga awalan di sini akan tercetak dua kali."
+        ),
+    )
     learning_objectives: tuple[str, ...] = ()
     sections: tuple[Section, ...] = ()
     examples: tuple[str, ...] = ()

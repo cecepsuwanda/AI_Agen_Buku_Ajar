@@ -1,6 +1,6 @@
 # Algoritma dan Struktur Data
 
-# Bab 1. Bab 1: Pengantar Struktur Data dan Analisis Kompleksitas
+# Bab 1. Pengantar Struktur Data dan Analisis Kompleksitas
 
 ## Tujuan Pembelajaran
 

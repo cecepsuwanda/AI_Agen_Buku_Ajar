@@ -286,6 +286,26 @@ def test_the_contract_names_every_field_and_shows_a_parseable_frame() -> None:
     assert ChapterDraft.model_validate(json.loads(frame))
 
 
+def test_the_contract_carries_field_descriptions_from_the_field() -> None:
+    """Aturan yang hidup di samping tipe harus sampai ke prompt tanpa ditulis dua kali.
+
+    ``title`` meminta judul **tanpa** awalan "Bab N:" lewat ``description``.
+    Bila kontrak tidak membacanya, model tidak pernah tahu, dan judul bab
+    tercetak bernomor dua kali.
+    """
+
+    class Described(BaseModel):
+        tanpa_awalan: str = Field(min_length=1, description="TANPA awalan 'Bab N:'")
+        biasa: str = ""
+
+    contract = render_output_contract(Described)
+
+    assert "TANPA awalan 'Bab N:'" in contract
+    assert "— TANPA awalan 'Bab N:'" in contract
+    # Field tanpa deskripsi tidak diberi tanda hubung menggantung.
+    assert "biasa: str —" not in contract
+
+
 def test_the_module_exports_do_not_leak_sdk_types() -> None:
     """``structured`` hanya menyentuh pydantic + stdlib — gerbang kemurnian kecil."""
     import domain.structured as module

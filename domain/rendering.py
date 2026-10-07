@@ -10,6 +10,47 @@ from __future__ import annotations
 from domain.book import ChapterSpec
 from domain.chapter import ChapterDraft
 
+#: Pemisah yang lazim dipakai model setelah nomor bab ("Bab 3:", "Bab 3 -", ...).
+_PREFIX_SEPARATORS = ":.-–—"
+
+
+def strip_chapter_prefix(title: str) -> str:
+    """Buang awalan penomoran bab yang ditambahkan model (MURNI).
+
+    Penulis cenderung mengisi ``title`` dengan ``"Bab 3: Analisis Leksikal"``
+    meski kontraknya hanya meminta judulnya: nomor bab ada di header prompt, dan
+    menyalinnya kembali terasa wajar. Karena :func:`render_chapter_markdown`
+    menambahkan nomornya sendiri, hasilnya menjadi ``"# Bab 3. Bab 3: ..."``.
+
+    Nomor yang tertulis di judul sengaja **tidak** dicocokkan dengan nomor bab
+    yang sebenarnya. Judul ``"Bab 2: ..."`` pada bab 3 tetap dibersihkan: nomor
+    yang benar adalah milik perender, dan judul yang salah nomor lebih baik
+    kehilangan nomornya daripada mempertahankan nomor yang keliru.
+
+    Judul yang setelah dibersihkan menjadi kosong (mis. ``"Bab 3"``) dikembalikan
+    apa adanya — kehilangan judul lebih buruk daripada judul yang berlebih.
+
+    Dipakai juga sebagai jaring pengaman: ``description`` pada
+    :attr:`~domain.chapter.ChapterDraft.title` mencegahnya di hulu, tetapi model
+    tetap dapat mengabaikannya, dan state lama sudah memuat judul yang berawalan.
+    """
+    text = title.strip()
+    if text[:3].lower() != "bab":
+        return text
+
+    rest = text[3:].lstrip()
+    digits = ""
+    while rest and rest[0].isdigit():
+        digits, rest = digits + rest[0], rest[1:]
+    if not digits:
+        return text
+
+    rest = rest.lstrip()
+    if rest and rest[0] in _PREFIX_SEPARATORS:
+        rest = rest[1:].lstrip()
+
+    return rest or text
+
 
 def render_chapter_markdown(
     draft: ChapterDraft,
@@ -18,7 +59,8 @@ def render_chapter_markdown(
     spec: ChapterSpec | None = None,
 ) -> str:
     """Render satu draf bab menjadi Markdown lengkap."""
-    lines: list[str] = [f"# Bab {number}. {draft.title}", ""]
+    heading = strip_chapter_prefix(draft.title)
+    lines: list[str] = [f"# Bab {number}. {heading}", ""]
 
     if draft.learning_objectives:
         lines.append("## Tujuan Pembelajaran")

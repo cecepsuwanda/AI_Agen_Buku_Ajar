@@ -8,6 +8,8 @@ model. Karena itu hasil render diuji sampai ke spasi barisnya.
 
 from __future__ import annotations
 
+import pytest
+
 from domain.book import ChapterSpec
 from domain.chapter import ChapterDraft, Section
 from domain.rendering import (
@@ -36,6 +38,45 @@ def test_the_title_carries_the_chapter_number() -> None:
     markdown = render_chapter_markdown(_draft(), number=3)
 
     assert markdown.startswith("# Bab 3. Struktur Data\n")
+
+
+def test_a_title_that_repeats_the_number_is_not_doubled() -> None:
+    """Penulis menyalin header prompt ke dalam judul; nomor itu milik perender."""
+    markdown = render_chapter_markdown(_draft(title="Bab 1: Struktur Data"), number=1)
+
+    assert markdown.startswith("# Bab 1. Struktur Data\n")
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Bab 1: Struktur Data",
+        "Bab 1 - Struktur Data",
+        "Bab 1. Struktur Data",
+        "BAB 1 — Struktur Data",
+        "bab 1 Struktur Data",
+        "Bab 7: Struktur Data",  # nomor keliru pun dibersihkan
+    ],
+)
+def test_every_style_of_chapter_prefix_is_stripped(title: str) -> None:
+    """Gaya penulisan awalan berbeda-beda antar-model; yang dibersihkan adalah polanya."""
+    markdown = render_chapter_markdown(_draft(title=title), number=1)
+
+    assert markdown.startswith("# Bab 1. Struktur Data\n")
+
+
+def test_a_title_without_a_prefix_is_left_alone() -> None:
+    """Judul yang sudah benar tidak boleh tersentuh — tidak ada yang perlu dibuang."""
+    markdown = render_chapter_markdown(_draft(title="Bab dan Buku"), number=2)
+
+    assert markdown.startswith("# Bab 2. Bab dan Buku\n")
+
+
+def test_a_title_that_is_only_a_prefix_is_kept() -> None:
+    """Kehilangan judul lebih buruk daripada judul yang berlebih."""
+    markdown = render_chapter_markdown(_draft(title="Bab 3"), number=3)
+
+    assert markdown.startswith("# Bab 3. Bab 3\n")
 
 
 def test_learning_objectives_are_rendered_as_a_list() -> None:
