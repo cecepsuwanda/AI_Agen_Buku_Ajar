@@ -114,6 +114,13 @@ def prompt_contexts(
     """
     common = _common_book_args()
     return {
+        "citation.chapter": {
+            **common,
+            "citations": ("Cormen, Introduction to Algorithms, 4th ed.",),
+            "evidence": _fixture_evidence(),
+            "research": empty_research,
+            "draft_json": '{"title": "Analisis Kompleksitas"}',
+        },
         "example.chapter": {
             **common,
             "required_examples": 3,

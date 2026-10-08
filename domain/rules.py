@@ -6,7 +6,7 @@ Setiap fungsi mengembalikan **record baru**; tidak ada yang memutasi apa pun.
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from domain.book import BookSpec, ChapterSpec
 from domain.chapter import (
@@ -623,6 +623,59 @@ def enforce_draft_contract(
         }
     )
     return fixed, tuple(notes)
+
+
+def foreign_citations(
+    draft: ChapterDraft,
+    *,
+    allowed: frozenset[str],
+) -> tuple[str, ...]:
+    """Sitasi draf yang **tidak** ada di ``allowed``, urut kemunculan (MURNI).
+
+    Ini pertanyaan yang berbeda dari :func:`enforce_draft_contract`, meski
+    predikatnya sama. Penulis **membersihkan** drafnya — rujukan asing dibuang
+    diam-diam, dengan satu catatan, karena penulis memang tidak dapat
+    memperbaikinya selain dengan menghapusnya. Pemeriksa sitasi (§22) tidak boleh
+    sepermisif itu: ia harus **menolak**, sebab rujukan yang tidak ada di
+    knowledge base adalah temuan yang harus terlihat, bukan kekotoran yang
+    dirapikan.
+
+    Duplikat dibuang: satu kunci asing yang dikutip tiga kali tetap satu hal yang
+    harus diperbaiki.
+    """
+    found: dict[str, None] = {}
+    for citation in draft.citations:
+        normalized = citation.strip()
+        if normalized and normalized not in allowed:
+            found.setdefault(normalized, None)
+    return tuple(found)
+
+
+def remembered_citations(
+    existing: Mapping[str, str],
+    research: ResearchPackage,
+) -> Mapping[str, str]:
+    """Daftar rujukan buku setelah sumber ``research`` ditambahkan (MURNI).
+
+    Inilah yang membuat §22 dapat ditegakkan **lintas bab**. Pemeriksa sitasi
+    sebuah bab bertanya "apakah rujukan ini berasal dari knowledge base?", dan
+    pertanyaan itu tidak dapat dijawab dari paket riset bab itu sendiri: sumber
+    yang sah dikutip bab 1 tetap sah dikutip bab 5, sekalipun pencarian bab 5
+    kebetulan tidak memunculkannya kembali. Daftar ini yang mengingatnya.
+
+    Nilainya untuk sekarang adalah nama sumbernya sendiri — itulah satu-satunya
+    hal yang benar-benar diketahui program tentang sumber itu. Entri bibliografis
+    lengkap menuntut metadata dokumen, dan menuliskannya dari nama berkas berarti
+    mengarang penulis dan tahun; hal itu baru dapat dikerjakan bersama ``.bib``
+    (§25), bukan sekarang.
+
+    Paket terdegradasi membawa ``sources`` kosong, sehingga tidak pernah menambah
+    entri — dan itu benar: ia memang tidak menemukan apa pun.
+    """
+    added = {source.strip(): source.strip() for source in research.sources if source.strip()}
+    if not added:
+        return existing
+    return {**existing, **added}
 
 
 # ---------------------------------------------------------------------------

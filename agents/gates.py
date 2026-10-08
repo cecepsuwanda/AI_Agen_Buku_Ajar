@@ -195,14 +195,16 @@ def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
 #: mengaktifkannya nanti benar-benar hanya satu baris konfigurasi:
 #:
 #:     pipeline:
-#:       gates: [fact_checked, citation_checked, reviewer]
+#:       gates: [fact_checked, pedagogy_reviewed, reviewer]
 #:
-#: Ketika agent sungguhnya tiba (``fact_checker.py``), ia mendaftar dengan nama
-#: yang sama dan ``register_gate`` akan menolak — memaksa keputusan sadar
-#: "hapus placeholder ini", bukan diam-diam menimpa.
+#: Ketika agent sungguhnya tiba, ia mendaftar dengan namanya sendiri dan **baris
+#: di bawah dihapus** — bukan ditimpa. Penghapusan itu bagian dari pekerjaan
+#: tahapnya, bukan akibat sampingnya, dan itulah gunanya ``register_gate``
+#: menolak nama yang sudah terpakai: ia memaksa keputusan sadar, bukan
+#: pembiaran. Yang pertama menjalaninya adalah ``citation_checked``, yang
+#: digantikan ``citation_checker`` pada Tahap 4 (§22).
 PLACEHOLDER_GATES: tuple[tuple[str, ChapterStatus], ...] = (
     ("fact_checked", ChapterStatus.FACT_CHECKED),
-    ("citation_checked", ChapterStatus.CITATION_CHECKED),
     ("pedagogy_reviewed", ChapterStatus.PEDAGOGY_REVIEWED),
     ("consistency_checked", ChapterStatus.CONSISTENCY_CHECKED),
     ("latex_generated", ChapterStatus.LATEX_GENERATED),

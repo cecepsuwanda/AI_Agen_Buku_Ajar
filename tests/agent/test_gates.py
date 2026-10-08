@@ -166,6 +166,25 @@ def test_placeholder_gate_produces_the_status_it_stands_for(context: GateContext
         assert gate.produces is expected_status
 
 
+#: Seluruh gate yang menutup rantai §27 pada hari ini, dalam urutan rantai.
+#:
+#: Daftarnya sengaja literal, seperti ``EXPECTED_PROMPTS`` di
+#: ``tests/unit/test_prompting.py``: setiap kali sebuah placeholder digantikan
+#: agent sungguhan (Tahap 4 menggantikan ``citation_checked`` dengan
+#: ``citation_checker``), daftar ini harus disunting — dan suntingan itu adalah
+#: keputusan sadar, bukan pembiaran. Menurunkannya dari ``PLACEHOLDER_GATES``
+#: justru akan menyembunyikan pergantian itu.
+CHAIN_GATES: tuple[str, ...] = (
+    "fact_checked",
+    "citation_checker",
+    "pedagogy_reviewed",
+    "consistency_checked",
+    "reviewer",
+    "latex_generated",
+    "latex_compiled",
+)
+
+
 # ---------------------------------------------------------------------------
 # 5. Integrasi dengan gerbang validasi domain
 # ---------------------------------------------------------------------------
@@ -176,9 +195,7 @@ def test_every_built_gate_advances_the_chain_legally(context: GateContext) -> No
     merusak state di tengah proses — dan itu jauh lebih mahal daripada gagal
     sebelum satu token pun dibakar.
     """
-    names = tuple(name for name, _ in PLACEHOLDER_GATES) + ("reviewer",)
-
-    validate_gates(build_gates(names, context))  # tidak boleh melempar
+    validate_gates(build_gates(CHAIN_GATES, context))  # tidak boleh melempar
 
 
 def test_the_full_chain_can_be_walked_by_gates_alone(context: GateContext) -> None:
@@ -188,9 +205,7 @@ def test_the_full_chain_can_be_walked_by_gates_alone(context: GateContext) -> No
     isinya, bukan bentuknya. Ketika agent sungguhnya tiba, yang berubah hanya
     kelas di balik satu nama gate.
     """
-    names = tuple(name for name, _ in PLACEHOLDER_GATES) + ("reviewer",)
-
-    reachable = {gate.produces for gate in build_gates(names, context)}
+    reachable = {gate.produces for gate in build_gates(CHAIN_GATES, context)}
 
     assert reachable == {
         ChapterStatus.FACT_CHECKED,

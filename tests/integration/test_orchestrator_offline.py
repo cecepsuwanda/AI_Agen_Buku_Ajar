@@ -50,6 +50,7 @@ from domain.errors import (
     ModelUnavailableError,
     StateWriteError,
 )
+from domain.ports import Researcher
 from domain.state import BookState
 from domain.structured import example_instance, strict_schema
 from memory.artifacts import MarkdownArtifacts
@@ -151,6 +152,7 @@ def build_director(
     reviewer_model: object | None = None,
     chapter_planner_model: object | None = None,
     writer: ChapterWriter | None = None,
+    researcher: Researcher | None = None,
     settings: DirectorSettings | None = None,
 ) -> tuple[BookDirector, StaticModelProvider]:
     """Rakit direktur sungguhan dengan model palsu.
@@ -177,7 +179,7 @@ def build_director(
             model=provider.chat("chapter_planner"), prompts=prompts
         ),
         writer=writer or ChapterWriter(model=provider.chat("writer"), prompts=prompts),
-        researcher=NullResearcher(),
+        researcher=researcher or NullResearcher(),
         gates=gates,
         state=state,
         artifacts=artifacts,
@@ -185,6 +187,23 @@ def build_director(
         settings=settings,
     )
     return director, provider
+
+
+class _FixedResearcher:
+    """``Researcher`` yang selalu mengembalikan paket yang sama.
+
+    Dipakai untuk menguji apa yang **dilakukan direktur** dengan paket riset,
+    bukan risetnya sendiri. Paket yang sungguhan hanya dapat dihasilkan oleh
+    retriever, dan memaksakan satu di sini justru akan menyembunyikan pembagian
+    tugas yang sedang diperiksa.
+    """
+
+    def __init__(self, package: ResearchPackage) -> None:
+        self._package = package
+
+    def collect(self, spec: ChapterSpec, book: BookState) -> ResearchPackage:
+        del spec, book
+        return self._package
 
 
 def chapter_markdown(artifacts: MarkdownArtifacts, number: int) -> str:
@@ -926,6 +945,41 @@ def test_each_chapter_sees_the_summaries_of_the_ones_before_it(
     # Penulis dipanggil sekali per bab, berurutan: panggilan kedua adalah bab 2.
     assert len(writer.requests) == 2
     assert first_summary in writer.requests[1].user
+
+
+def test_the_sources_a_chapter_was_written_from_are_remembered_for_the_next_ones(
+    prompt_library: FilePromptLibrary,
+    state: JsonStateStore,
+    artifacts: MarkdownArtifacts,
+    reporter: RecordingReporter,
+) -> None:
+    """§22 bekerja lintas bab, dan hanya ``book.json`` yang dapat mengingatnya.
+
+    Pemeriksa sitasi bab 5 bertanya "apakah rujukan ini berasal dari knowledge
+    base?". Pertanyaan itu **tidak dapat** dijawab dari paket riset bab 5
+    sendiri: sumber yang sudah ditemukan bab 1 tetap sah dikutip bab 5,
+    sekalipun pencarian bab 5 kebetulan tidak memunculkannya kembali.
+
+    Karena itu sumbernya dicatat **saat babnya disetujui** — bukan di akhir
+    ``run``. Bab-bab yang ditulis dalam proses yang sama harus sudah dapat
+    membacanya, dan itu justru kondisi normal.
+    """
+    seed_book(state, chapters=1)
+    source = "Cormen, Introduction to Algorithms, 4th ed."
+    research = ResearchPackage(evidence=(), sources=(source,), degraded=False)
+    director, _ = build_director(
+        prompts=prompt_library,
+        state=state,
+        artifacts=artifacts,
+        reporter=reporter,
+        researcher=_FixedResearcher(research),
+    )
+
+    director.run()
+
+    book = state.load_book()
+    assert book is not None
+    assert book.citations == {source: source}
 
 
 def test_research_stays_degraded_and_is_recorded_as_such(

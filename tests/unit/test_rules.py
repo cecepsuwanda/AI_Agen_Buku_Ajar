@@ -14,7 +14,11 @@ sebab itulah satu-satunya cara cacat seperti itu terlihat.
 
 Fungsi ``rules`` yang lain (``reconcile_*``, ``enforce_draft_contract``,
 ``citations_allowed_by``, ``decide_review``) diuji lewat agent yang memakainya,
-di ``tests/agent/``, karena di sana perilakunya punya konteks.
+di ``tests/agent/``, karena di sana perilakunya punya konteks. Dua pengecualian
+adalah :func:`~domain.rules.foreign_citations` dan
+:func:`~domain.rules.remembered_citations` — keduanya diletakkan di sini karena
+yang diuji bukan perilaku sebuah agent, melainkan **predikat** yang harus berlaku
+sama di mana pun ia dipakai.
 """
 
 from __future__ import annotations
@@ -27,8 +31,10 @@ from domain.enums import ChapterEvent, ChapterStatus
 from domain.errors import ChapterNotPlannedError, InvalidGateError
 from domain.rules import (
     find_chapter,
+    foreign_citations,
     pending_numbers,
     progress_status,
+    remembered_citations,
     reopen_failed,
     reset_for_rerun,
     validate_gates,
@@ -414,3 +420,124 @@ def test_a_rejecting_gate_cannot_install_its_own_draft() -> None:
     assert rejected.status is ChapterStatus.FAILED_REVIEW
     assert rejected.draft == DRAFT
     assert rejected.revision == 1
+
+
+# ---------------------------------------------------------------------------
+# foreign_citations — pemeriksa menolak di tempat penulis membersihkan (§22)
+# ---------------------------------------------------------------------------
+def cited(*keys: str) -> ChapterDraft:
+    """Draf yang mengutip ``keys``, urut sebagaimana ditulis."""
+    return ChapterDraft(title="Draf Bab", citations=keys)
+
+
+def test_citations_outside_the_allowed_set_are_reported_in_order() -> None:
+    draft = cited("Cormen", "Knuth", "Aho", "Knuth")
+
+    assert foreign_citations(draft, allowed=frozenset({"Cormen", "Aho"})) == ("Knuth",)
+
+
+def test_a_key_cited_three_times_is_still_one_thing_to_fix() -> None:
+    """Duplikat dibuang: penulis memperbaiki rujukan, bukan kemunculannya."""
+    draft = cited("Knuth", "Knuth", "Knuth")
+
+    assert foreign_citations(draft, allowed=frozenset()) == ("Knuth",)
+
+
+def test_the_order_of_appearance_is_preserved() -> None:
+    """Urutannya mengikuti draf, supaya laporannya dapat dibaca berdampingan dengan babnya."""
+    draft = cited("Knuth", "Cormen", "Rusell")
+
+    assert foreign_citations(draft, allowed=frozenset({"Cormen"})) == ("Knuth", "Rusell")
+
+
+def test_allowed_citations_are_never_reported() -> None:
+    """Bila tidak ada yang asing, jawabannya kosong — dan itu yang membuat gate diam."""
+    draft = cited("Cormen", "Aho")
+
+    assert foreign_citations(draft, allowed=frozenset({"Cormen", "Aho"})) == ()
+
+
+def test_an_empty_allowed_set_makes_every_citation_foreign() -> None:
+    """Penulis yang bekerja tanpa knowledge base tidak boleh mengutip apa pun (§17)."""
+    assert foreign_citations(cited("Cormen"), allowed=frozenset()) == ("Cormen",)
+
+
+def test_blank_citation_entries_are_not_foreign_keys() -> None:
+    """Entri kosong adalah kotoran, bukan rujukan asing — dan tidak dilaporkan sebagai rujukan."""
+    draft = cited("", "   ")
+
+    assert foreign_citations(draft, allowed=frozenset()) == ()
+
+
+def test_whitespace_around_a_key_does_not_make_it_foreign() -> None:
+    """Sama seperti pencocokan bukti di ``domain.checking``: spasi di ujung bukan perbedaan."""
+    draft = cited("  Cormen  ")
+
+    assert foreign_citations(draft, allowed=frozenset({"Cormen"})) == ()
+
+
+def test_a_draft_without_citations_has_nothing_foreign() -> None:
+    assert foreign_citations(DRAFT, allowed=frozenset()) == ()
+
+
+# ---------------------------------------------------------------------------
+# remembered_citations — yang membuat §22 dapat ditegakkan lintas bab
+# ---------------------------------------------------------------------------
+def test_the_sources_of_the_research_are_remembered() -> None:
+    research = ResearchPackage(evidence=(), sources=("Cormen",), degraded=False)
+
+    assert remembered_citations({}, research) == {"Cormen": "Cormen"}
+
+
+def test_the_order_of_appearance_is_preserved_with_new_sources_last() -> None:
+    """Buku yang sudah tercatat tidak berpindah tempat karena bab baru selesai."""
+    existing = {"Aho": "Aho"}
+    research = ResearchPackage(evidence=(), sources=("Cormen", "Knuth"), degraded=False)
+
+    assert tuple(remembered_citations(existing, research)) == ("Aho", "Cormen", "Knuth")
+
+
+def test_a_source_already_remembered_is_not_duplicated() -> None:
+    existing = {"Cormen": "Cormen"}
+    research = ResearchPackage(evidence=(), sources=("Cormen",), degraded=False)
+
+    remembered = remembered_citations(existing, research)
+
+    assert tuple(remembered) == ("Cormen",)
+
+
+def test_a_degraded_package_adds_nothing_and_returns_the_same_object() -> None:
+    """Paket terdegradasi memang tidak menemukan apa pun; menambah entri berarti mengarang.
+
+    Objek yang sama dikembalikan — bukan sekadar salinan yang kebetulan kosong —
+    supaya pemanggilnya dapat melewati penulisan ``state/book.json`` sepenuhnya.
+    """
+    existing = {"Aho": "Aho"}
+
+    assert remembered_citations(existing, ResearchPackage.empty()) is existing
+
+
+def test_blank_source_names_are_not_remembered() -> None:
+    """Nama kosong akan menjadi kunci kosong di ``book.citations`` — dan mengizinkan apa saja."""
+    research = ResearchPackage(evidence=(), sources=("", "   "), degraded=False)
+
+    assert remembered_citations({}, research) == {}
+
+
+def test_whitespace_around_a_source_name_is_trimmed_before_it_is_stored() -> None:
+    """Kunci dan nilainya sama-sama dirapikan, agar cocok dengan yang ditulis penulis."""
+    research = ResearchPackage(evidence=(), sources=("  Cormen  ",), degraded=False)
+
+    assert remembered_citations({}, research) == {"Cormen": "Cormen"}
+
+
+def test_existing_entries_survive_a_later_chapter() -> None:
+    """Bab 5 tidak boleh menghapus sumber yang ditemukan bab 1 — itu inti §22."""
+    existing = {"Cormen": "Cormen", "Aho": "Aho"}
+    research = ResearchPackage(evidence=(), sources=("Knuth",), degraded=False)
+
+    remembered = remembered_citations(existing, research)
+
+    assert remembered["Cormen"] == "Cormen"
+    assert remembered["Aho"] == "Aho"
+    assert remembered["Knuth"] == "Knuth"

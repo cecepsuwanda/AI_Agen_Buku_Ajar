@@ -69,6 +69,7 @@ from domain.rendering import render_chapter_markdown
 from domain.rules import (
     find_chapter,
     pending_numbers,
+    remembered_citations,
     reopen_failed,
     reset_for_rerun,
     with_draft,
@@ -619,7 +620,7 @@ class BookDirector:
 
         final = approved.model_copy(update={"markdown_path": path})
         self._state.save_chapter(final)
-        self._record_summary(final)
+        self._remember_chapter(final)
         self._reporter.chapter_finished(final)
         return final
 
@@ -671,31 +672,55 @@ class BookDirector:
         self._reporter.warn(f"Bab {record.number}: Markdown hilang, dirender ulang dari state.")
         return restored
 
-    def _record_summary(self, record: ChapterRecord) -> None:
-        """Simpan ringkasan bab ke ``BookState.summaries`` (§29).
+    def _remember_chapter(self, record: ChapterRecord) -> None:
+        """Titipkan bab yang baru disetujui ke memori bersama buku (§22, §29).
 
-        Ringkasan inilah satu-satunya hal yang dibaca bab berikutnya tentang bab
-        sebelumnya, dan ia harus sudah tersimpan **sebelum** bab berikutnya
-        dimulai. Menyimpannya di akhir ``run`` akan membuat bab-bab yang ditulis
-        dalam proses yang sama tidak pernah melihatnya — dan itu justru
-        kondisi normal, bukan kasus tepi.
+        Dua hal dicatat di sini, dan keduanya punya alasan yang sama: **bab
+        berikutnya harus sudah dapat membacanya sebelum ia dimulai.**
+        Menyimpannya di akhir ``run`` akan membuat bab-bab yang ditulis dalam
+        proses yang sama tidak pernah melihatnya — dan itu justru kondisi
+        normal, bukan kasus tepi.
 
-        ``terminology`` sengaja tidak diisi pada MVP: mengekstrak istilah butuh
-        Consistency Checker (§26) yang belum ada, dan menebaknya dari prosa akan
+        * ``summaries`` — ringkasan bab ini, satu-satunya hal yang dibaca bab
+          berikutnya tentang bab sebelumnya.
+        * ``citations`` — sumber yang sudah lolos pemeriksaan sitasi. Inilah yang
+          membuat §22 dapat ditegakkan lintas bab (lihat
+          :func:`~domain.rules.remembered_citations`).
+
+        Keduanya ditulis dalam **satu** pemuatan dan satu penyimpanan. Dua
+        pemanggilan terpisah akan meninggalkan state yang setengah diperbarui
+        bila prosesnya terputus di antaranya, dan tidak ada yang tahu urutan mana
+        yang benar.
+
+        ``terminology`` sengaja masih tidak diisi: mengekstrak istilah butuh
+        Consistency Checker (§24) yang belum ada, dan menebaknya dari prosa akan
         mengisi memori bersama dengan entri yang salah — lebih buruk daripada
         kosong, karena agent berikutnya akan mempercayainya.
         """
-        draft = record.draft
-        if draft is None or not draft.summary.strip():
-            return
-
         book = self._state.load_book()
         if book is None:
             return
 
-        summaries = dict(book.summaries)
-        summaries[record.number] = draft.summary.strip()
-        self._state.save_book(book.model_copy(update={"summaries": summaries}))
+        updated = book
+        draft = record.draft
+        if draft is not None and draft.summary.strip():
+            summaries = dict(book.summaries)
+            summaries[record.number] = draft.summary.strip()
+            updated = updated.model_copy(update={"summaries": summaries})
+
+        if record.research is not None:
+            updated = updated.model_copy(
+                update={
+                    "citations": remembered_citations(updated.citations, record.research),
+                }
+            )
+
+        # Dibandingkan dengan **nilai**, bukan identitas: paket riset terdegradasi
+        # tidak menambah satu pun sumber, dan menulis ulang ``book.json`` untuk
+        # sesuatu yang tidak berubah hanya menambah satu titik gagal.
+        if updated == book:
+            return
+        self._state.save_book(updated)
 
     # -----------------------------------------------------------------
     # Kegagalan

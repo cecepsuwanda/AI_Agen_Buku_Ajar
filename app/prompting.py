@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from domain.book import BookSpec, ChapterSpec
 from domain.chapter import ChapterDraft, ResearchFindings, ReviewVerdict
+from domain.checking import CheckVerdict
 from domain.document import OcrPage
 from domain.errors import ConfigError
 from domain.examples import ExampleSet, ExerciseSet
@@ -55,6 +56,9 @@ OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "exercise.ExerciseSet": ExerciseSet,
     "researcher.ResearchFindings": ResearchFindings,
     "ocr.OcrPage": OcrPage,
+    # Satu model untuk keempat pemeriksa §21–§24: vonisnya berbentuk sama, dan
+    # bentuk yang sama itu tinggal di satu tempat (lihat ``domain.checking``).
+    "checker.CheckVerdict": CheckVerdict,
 }
 
 #: Kunci front-matter yang wajib ada di setiap berkas prompt.

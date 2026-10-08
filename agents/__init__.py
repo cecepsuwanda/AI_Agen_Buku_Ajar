@@ -12,6 +12,7 @@ dan tidak ada yang mengira ada logika di sini.
 from agents.base import StructuredAgent
 from agents.book_director import BookDirector, DirectorSettings
 from agents.chapter_planner import ChapterPlannerAgent
+from agents.citation_checker import CitationChecker, CitationCheckerAgent
 from agents.example_writer import ExampleWriterAgent, ExampleWriterGate
 from agents.exercise_writer import ExerciseWriterAgent, ExerciseWriterGate
 from agents.gates import PassThroughGate, build_gates, register_gate, registered_gate_names
@@ -27,6 +28,8 @@ __all__ = [
     "ChapterReviewer",
     "ChapterReviewerAgent",
     "ChapterWriter",
+    "CitationChecker",
+    "CitationCheckerAgent",
     "DirectorSettings",
     "ExampleWriterAgent",
     "ExampleWriterGate",
