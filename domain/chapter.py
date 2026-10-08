@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Mapping
+
 from pydantic import Field
 
 from domain.base import FrozenModel
@@ -122,6 +124,15 @@ class ReviewResult(FrozenModel):
     ``record.draft`` sudah menyimpan draf itu, dan menyimpannya lagi di dalam
     setiap review akan menggandakan ukuran berkas state hanya untuk
     menduplikasi isi yang sama.
+
+    ``terminology`` adalah jalur kedua yang bentuknya sama, dan ia ada karena
+    alasan yang sama pula: gate §24 menilai bab **terhadap seluruh buku**, jadi
+    ia satu-satunya yang tahu istilah apa saja yang bab ini pakai. Tanpa jalur
+    ini, ``BookState.terminology`` tidak akan pernah terisi, dan bab berikutnya
+    tidak punya pembanding apa pun. Yang memindahkannya ke state buku adalah
+    :func:`~domain.rules.approved_terminology`, dan hanya dari review yang
+    **lulus** — glosarium bab yang ditolak belum tentu mewakili babnya yang
+    sesungguhnya.
     """
 
     gate: str
@@ -130,6 +141,7 @@ class ReviewResult(FrozenModel):
     feedback: tuple[str, ...] = ()
     skipped: bool = False
     enriched_draft: "ChapterDraft | None" = None
+    terminology: Mapping[str, str] = Field(default_factory=dict)
 
 
 class ReviewVerdict(FrozenModel):

@@ -44,11 +44,18 @@ from domain.errors import (
     ServiceUnavailableError,
     StateCorruptError,
 )
+from domain.graph import (
+    ConceptGraph,
+    find_duplicate_explanations,
+    neighbours,
+    prerequisites_of,
+)
 from domain.latex import bibliography_sources, build_advisories, build_problems
 from domain.rendering import render_book_markdown, render_chapter_markdown
 from domain.rps import CoursePlan, render_course_plan
 from domain.state import RunReport
 from domain.transitions import has_reached
+from graph.knowledge_graph import JsonGraphStore, graph_from_directories
 from ingestion.document_normalizer import normalize_documents
 from ingestion.loader import IngestedFile, OcrRoute, load_reference_files
 from ingestion.rps_loader import parse_rps
@@ -712,12 +719,19 @@ def _write_chapter(number: int, params: RunParams, reporter: RichReporter) -> in
 # ingest
 # ---------------------------------------------------------------------------
 def do_ingest(params: RunParams) -> int:
-    """Bangun ulang indeks vektor dari direktori bahan rujukan (§10, §13).
+    """Bangun ulang basis pengetahuan turunan: indeks vektor **dan** graf konsep (§10, §13, §14).
 
     Perintah tersendiri, bukan efek samping ``run``. Alasan yang sama yang
     tertulis di :class:`~app.config.RagConfig`: menyalakan RAG pada indeks yang
     belum dibangun harus **terlihat** — dan di sini ia terlihat, karena membangun
     indeks adalah tindakan yang disebut namanya.
+
+    Kedua turunan itu dibangun di sini karena keduanya milik ``knowledge/``, dan
+    ``knowledge/`` adalah satu hal: bahan yang dapat dihapus dan dibangun ulang
+    dari ``input/``. Memisahkannya menjadi dua perintah berarti menambah satu
+    keadaan yang mungkin: indeks yang baru dan graf yang basi. Yang tetap berbeda
+    adalah **sumbernya** — indeks dari ``input/references/``, graf dari sumber
+    LaTeX — dan karena itu keduanya dijalankan terpisah di dalam.
     """
     reporter = build_console_reporter(verbose=params.globals.verbose)
     return guarded(reporter, lambda: _ingest(params, reporter))
@@ -731,6 +745,11 @@ def _ingest(params: RunParams, reporter: RichReporter) -> int:
             "Indeks vektor tidak dirakit pada jalankan ini (--dry-run). "
             "Bangun indeksnya dengan 'ingest' tanpa --dry-run."
         )
+
+    # Graf lebih dulu, dan sebelum penjagaan apa pun di bawah: sumbernya berbeda
+    # dari sumber indeks. Direktori rujukan yang kosong tidak boleh membuat graf
+    # yang bahannya lengkap tidak ikut dibangun.
+    _rebuild_graph(container, reporter)
 
     directory = (
         params.references if params.references is not None else container.paths.input / "references"
@@ -768,6 +787,57 @@ def _ingest(params: RunParams, reporter: RichReporter) -> int:
         index_dir=container.paths.vector_store_dir,
     )
     return 0
+
+
+# ---------------------------------------------------------------------------
+# graf konsep (§14)
+# ---------------------------------------------------------------------------
+def _graph_sources(container: Container) -> tuple[Path, ...]:
+    """Direktori sumber graf konsep, berurut (§11, §14) (MURNI).
+
+    Dua direktori, dan urutannya tetap: bahan rujukan yang ditulis manusia lebih
+    dulu, lalu bab-bab yang dihasilkan buku ini sendiri. Urutan itu menentukan
+    definisi mana yang bertahan ketika satu konsep muncul di keduanya — dan bahan
+    rujukan memang yang seharusnya menang.
+    """
+    return (
+        container.paths.input / "source_latex",
+        container.paths.latex_chapters_dir,
+    )
+
+
+def _rebuild_graph(container: Container, reporter: RichReporter) -> None:
+    """Bangun ulang ``knowledge/graph/`` dari sumber LaTeX, lalu laporkan (§14).
+
+    :raises ArtifactWriteError: bila grafiknya gagal ditulis. Ditahan
+        :func:`guarded` seperti kegagalan lain perintah ini — graf yang tidak
+        dapat ditulis adalah kerusakan yang harus terlihat, bukan sesuatu yang
+        boleh dilanjutkan diam-diam.
+    """
+    if not container.config.graph.enabled:
+        reporter.info(
+            "Graf konsep dimatikan (graph.enabled: false); knowledge/graph/ tidak diubah."
+        )
+        return
+
+    store = JsonGraphStore(container.paths.graph_dir)
+    previous = store.load()
+    graph = graph_from_directories(_graph_sources(container))
+
+    # Ditulis hanya bila berubah, sama seperti ``BookDirector._remember_chapter``:
+    # graf yang sama persis dan ditulis ulang hanya menambah satu titik gagal dan
+    # satu diff kosong di git.
+    if graph != previous:
+        store.save(graph)
+
+    _print_graph_report(
+        reporter,
+        before=previous,
+        after=graph,
+        graph_dir=container.paths.graph_dir,
+        sources=_graph_sources(container),
+        max_depth=container.config.graph.max_depth,
+    )
 
 
 def _chunk_by_file(
@@ -840,6 +910,67 @@ def _print_ingest_report(
     reporter.info(
         "Bahan yang diganti cukup di-*ingest* ulang: id potongan diturunkan dari "
         "nama berkas, halaman, dan nomor paragraf."
+    )
+
+
+def _print_graph_report(
+    reporter: RichReporter,
+    *,
+    before: ConceptGraph,
+    after: ConceptGraph,
+    graph_dir: Path,
+    sources: tuple[Path, ...],
+    max_depth: int,
+) -> None:
+    """Cetak graf konsep: tiap konsep, prasyaratnya, rujukannya, dan yang kembar (§14).
+
+    Tiga kolom tengah tabel itu adalah tiga dari lima guna yang §14 sebutkan —
+    ``prasyarat`` menjawab *prerequisite*, ``menunjuk`` menjawab *cross-reference*,
+    dan kelompok penjelasan kembar di bawahnya menjawab *duplicate explanation
+    detection*. ``max_depth`` diteruskan ke :func:`~domain.graph.prerequisites_of`
+    alih-alih dibiarkan pada nilai bawaannya: graf ini dapat bersiklus, dan berapa
+    jauh penelusurannya boleh berjalan adalah keputusan konfigurasi, bukan
+    keputusan yang ditanam di dalam fungsi murni.
+    """
+    table = Table(title=f"Graf konsep: {graph_dir}", header_style="bold")
+    table.add_column("konsep")
+    table.add_column("bab", justify="right")
+    table.add_column("prasyarat", justify="right")
+    table.add_column("menunjuk", justify="right")
+
+    for node in after.nodes:
+        prerequisites = prerequisites_of(after, node.name, max_depth=max_depth)
+        outgoing = neighbours(after, node.name)
+        table.add_row(
+            node.name,
+            str(node.chapter) if node.chapter is not None else "-",
+            str(len(prerequisites)) if prerequisites else "-",
+            str(len(outgoing)) if outgoing else "-",
+        )
+    reporter.console.print(table)
+
+    reporter.console.print(
+        f"[green]{len(after.nodes)} konsep dan {len(after.edges)} relasi[/green] "
+        f"(sebelumnya {len(before.nodes)} dan {len(before.edges)})."
+    )
+    if not after.nodes:
+        listed = ", ".join(str(source) for source in sources)
+        reporter.info(
+            f"Belum ada berkas .tex di {listed}. Graf terisi sendiri begitu salah "
+            "satunya ada; perintah ini tidak perlu dijalankan ulang untuk itu."
+        )
+
+    for group in find_duplicate_explanations(after):
+        listed = ", ".join(repr(name) for name in group)
+        reporter.warn(
+            f"Konsep yang definisinya sama persis: {listed}. Satu konsep yang "
+            "dijelaskan dua kali biasanya cukup dijelaskan sekali, lalu dirujuk (§14)."
+        )
+
+    reporter.info(
+        "Graf ini turunan: ia dibangun dari berkas .tex, bukan dari ringkasan bab. "
+        "Ringkasan bab harus diubah menjadi konsep oleh model, dan itu pekerjaan "
+        "yang tidak dilakukan perintah ini."
     )
 
 

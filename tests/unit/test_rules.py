@@ -14,11 +14,16 @@ sebab itulah satu-satunya cara cacat seperti itu terlihat.
 
 Fungsi ``rules`` yang lain (``reconcile_*``, ``enforce_draft_contract``,
 ``citations_allowed_by``, ``decide_review``) diuji lewat agent yang memakainya,
-di ``tests/agent/``, karena di sana perilakunya punya konteks. Dua pengecualian
-adalah :func:`~domain.rules.foreign_citations` dan
-:func:`~domain.rules.remembered_citations` — keduanya diletakkan di sini karena
+di ``tests/agent/``, karena di sana perilakunya punya konteks. Tiga pengecualian
+adalah :func:`~domain.rules.foreign_citations`,
+:func:`~domain.rules.remembered_citations`, dan
+:func:`~domain.rules.approved_terminology` — ketiganya diletakkan di sini karena
 yang diuji bukan perilaku sebuah agent, melainkan **predikat** yang harus berlaku
 sama di mana pun ia dipakai.
+
+Dua yang terakhir adalah pasangan yang sengaja berdekatan: keduanya memindahkan
+sesuatu dari satu bab ke state buku — sitasi dari paket riset (§22), istilah dari
+glosarium gate §24 — dan keduanya hanya menghitung apa yang **lulus**.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from domain.chapter import ChapterDraft, ChapterRecord, ResearchPackage, ReviewR
 from domain.enums import ChapterEvent, ChapterStatus
 from domain.errors import ChapterNotPlannedError, InvalidGateError
 from domain.rules import (
+    approved_terminology,
     find_chapter,
     foreign_citations,
     pending_numbers,
@@ -541,3 +547,62 @@ def test_existing_entries_survive_a_later_chapter() -> None:
     assert remembered["Cormen"] == "Cormen"
     assert remembered["Aho"] == "Aho"
     assert remembered["Knuth"] == "Knuth"
+
+
+# ---------------------------------------------------------------------------
+# approved_terminology — yang membuat §24 dapat ditegakkan lintas bab
+# ---------------------------------------------------------------------------
+def _reviewed(*reviews: ReviewResult) -> ChapterRecord:
+    """Catatan bab yang hanya dipakai tes ini: yang penting hanyalah reviewnya."""
+    return ChapterRecord(number=7, status=ChapterStatus.CONSISTENCY_CHECKED, reviews=reviews)
+
+
+def test_a_record_without_reviews_remembers_no_terms() -> None:
+    """Bab yang belum pernah melewati gate §24 belum mencatat apa pun."""
+    assert approved_terminology(_reviewed()) == {}
+
+
+def test_the_glossary_of_an_approved_review_is_remembered() -> None:
+    """Inilah satu-satunya jalan ``BookState.terminology`` terisi."""
+    review = ReviewResult(
+        gate="consistency_checker",
+        approved=True,
+        score=9,
+        terminology={"finite-state machine": "Mesin keadaan berhingga."},
+    )
+
+    assert approved_terminology(_reviewed(review)) == {
+        "finite-state machine": "Mesin keadaan berhingga."
+    }
+
+
+def test_the_glossary_of_a_rejected_review_is_not_remembered() -> None:
+    """Bab yang ditolak §24 belum tentu memakai istilahnya dengan benar.
+
+    Glosariumnya adalah catatan tentang bab yang sedang menuju revisi, bukan
+    tentang bab yang akan dibaca mahasiswa.
+    """
+    review = ReviewResult(
+        gate="consistency_checker",
+        approved=False,
+        score=3,
+        terminology={"finite-state machine": "Entah."},
+    )
+
+    assert approved_terminology(_reviewed(review)) == {}
+
+
+def test_a_later_review_wins_over_an_earlier_one() -> None:
+    """Revisi terakhirlah yang disetujui — definisi lamanya sudah tidak berlaku."""
+    first = ReviewResult(gate="a", approved=True, score=9, terminology={"DFA": "Definisi lama."})
+    second = ReviewResult(gate="b", approved=True, score=9, terminology={"DFA": "Definisi baru."})
+
+    assert approved_terminology(_reviewed(first, second)) == {"DFA": "Definisi baru."}
+
+
+def test_terms_of_different_reviews_are_merged_rather_than_replaced() -> None:
+    """Bab yang melewati dua putaran revisi tidak kehilangan istilah putaran pertama."""
+    first = ReviewResult(gate="a", approved=True, score=9, terminology={"DFA": "Definisi."})
+    second = ReviewResult(gate="b", approved=True, score=9, terminology={"Regex": "Definisi."})
+
+    assert tuple(approved_terminology(_reviewed(first, second))) == ("DFA", "Regex")

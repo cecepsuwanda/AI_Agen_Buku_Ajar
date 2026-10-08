@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 from domain.book import BookSpec, ChapterSpec
 from domain.chapter import ChapterDraft, ResearchFindings, ReviewVerdict
-from domain.checking import CheckVerdict
+from domain.checking import CheckVerdict, ConsistencyVerdict
 from domain.document import OcrPage
 from domain.errors import ConfigError
 from domain.examples import ExampleSet, ExerciseSet
@@ -58,9 +58,15 @@ OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "researcher.ResearchFindings": ResearchFindings,
     "ocr.OcrPage": OcrPage,
     "latex.LatexChapter": LatexChapter,
-    # Satu model untuk keempat pemeriksa §21–§24: vonisnya berbentuk sama, dan
-    # bentuk yang sama itu tinggal di satu tempat (lihat ``domain.checking``).
+    # Satu model untuk pemeriksa §21–§23: vonisnya berbentuk sama, dan bentuk
+    # yang sama itu tinggal di satu tempat (lihat ``domain.checking``).
     "checker.CheckVerdict": CheckVerdict,
+    # §24 memakai subclass-nya, bukan bentuk yang sama: Consistency Checker
+    # mengembalikan glosarium bab di samping vonisnya, dan glosarium itu satu-
+    # satunya jalan ``BookState.terminology`` terisi. Kuncinya dipisah supaya
+    # prompt §24 benar-benar meminta glosarium itu — kunci yang dipakai bersama
+    # pemeriksa lain akan membuat §24 kehilangan bagian keluarannya tanpa suara.
+    "checker.ConsistencyVerdict": ConsistencyVerdict,
 }
 
 #: Kunci front-matter yang wajib ada di setiap berkas prompt.

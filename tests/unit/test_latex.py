@@ -37,6 +37,7 @@ from domain.latex import (
     build_problems,
     chapter_citations,
     chapter_latex_filename,
+    chapter_number_from_filename,
     citation_key,
     crossref_findings,
     escape_latex,
@@ -603,6 +604,40 @@ def test_latex_filenames_match_their_markdown_twins() -> None:
 
 def test_numbering_does_not_truncate_beyond_ninety_nine() -> None:
     assert chapter_latex_filename(100) == "chapter100.tex"
+
+
+def test_the_chapter_number_can_be_read_back_from_the_filename() -> None:
+    """Kebalikan :func:`chapter_latex_filename` — dipakai graf untuk menaruh konsep.
+
+    Graf konsep membangun simpulnya dari **berkas**, jadi satu-satunya hal yang
+    dapat diketahuinya tentang bab asal sebuah bahan adalah namanya. Tanpa
+    kebalikan ini, setiap konsep dari ``input/source_latex/`` akan masuk graf
+    tanpa nomor bab, dan prasyarat antar-bab tidak akan pernah dapat ditelusuri.
+    """
+    for number in (1, 7, 9, 10, 100):
+        assert chapter_number_from_filename(chapter_latex_filename(number)) == number
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "chapter.tex",  # tanpa nomor
+        "chapter01.md",  # bukan berkas LaTeX
+        "bab01.tex",  # awalan yang tidak dikenal
+        "chapter01.tex.bak",
+        "chapter-1.tex",
+        "chapter0.tex",  # bab bernomor nol tidak ada
+        "intro.tex",
+    ],
+)
+def test_a_filename_that_does_not_follow_the_pattern_has_no_chapter(filename: str) -> None:
+    """``None`` — bukan tebakan. Bahan rujukan tidak selalu milik satu bab."""
+    assert chapter_number_from_filename(filename) is None
+
+
+def test_a_filename_with_surrounding_whitespace_is_still_read() -> None:
+    """Nama berkas yang datang dari daftar direktori dapat membawa spasi di ujungnya."""
+    assert chapter_number_from_filename("  chapter03.tex  ") == 3
 
 
 def test_the_bibliography_filename_is_the_one_bibtex_is_told_to_look_for() -> None:

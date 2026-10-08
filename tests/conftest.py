@@ -20,6 +20,7 @@ import pytest
 from app.prompting import FilePromptLibrary
 from agents.context import evidence_lines
 from domain.chapter import Evidence, ResearchPackage
+from domain.graph import CHECKS, TerminologyDrift
 from domain.pedagogy import LADDER
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +121,30 @@ def prompt_contexts(
             "citations": ("Cormen, Introduction to Algorithms, 4th ed.",),
             "evidence": _fixture_evidence(),
             "research": empty_research,
+            "draft_json": '{"title": "Analisis Kompleksitas"}',
+        },
+        "consistency.chapter": {
+            **common,
+            # Daftar periksa dan dugaan penyimpangan dikirim sebagai daftar
+            # terpisah, bukan disisipkan ke dalam prosa instruksi prompt: yang
+            # harus dijawab satu per satu adalah kesembilan hal §24, dan
+            # kelengkapannya diperiksa ``domain.checking.unexamined`` terhadap
+            # daftar yang sama persis (``domain.graph.CHECKS``).
+            "checks": CHECKS,
+            # Dugaannya sengaja dipilih yang **benar-benar** dapat dipastikan
+            # program — bentuk bertanda hubung dari istilah yang sudah ada di
+            # ``terminology`` di atas. Contoh §24 sendiri (*finite automaton* /
+            # *finite-state machine*) adalah sinonim sungguhan, dan justru
+            # itulah yang tidak dapat dipastikan mesin; menaruhnya di sini akan
+            # membuat contoh konteks ini berbohong tentang apa yang dihitung
+            # ``detect_terminology_drift``.
+            "drift": (
+                TerminologyDrift(
+                    term="kompleksitas-waktu",
+                    known="kompleksitas waktu",
+                    reason="hanya berbeda tanda hubung atau spasi",
+                ),
+            ),
             "draft_json": '{"title": "Analisis Kompleksitas"}',
         },
         "example.chapter": {

@@ -186,8 +186,8 @@ class CitationChecker:
 
         ``skipped`` bernilai benar dan bukan hiasan. Bab yang lolos tanpa
         pemeriksaan harus terlihat sebagai bab yang lolos tanpa pemeriksaan —
-        sama seperti gate tahap yang belum berpenghuni. Yang salah adalah
-        melaporkannya sebagai bab yang sitasinya sudah diperiksa.
+        sama seperti tahap yang dimatikan karena fiturnya tidak ada. Yang salah
+        adalah melaporkannya sebagai bab yang sitasinya sudah diperiksa.
         """
         return ReviewResult(
             gate=self.name,

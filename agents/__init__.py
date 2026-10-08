@@ -13,6 +13,7 @@ from agents.base import StructuredAgent
 from agents.book_director import BookDirector, DirectorSettings
 from agents.chapter_planner import ChapterPlannerAgent
 from agents.citation_checker import CitationChecker, CitationCheckerAgent
+from agents.consistency_checker import ConsistencyCheckerAgent, ConsistencyGate
 from agents.example_writer import ExampleWriterAgent, ExampleWriterGate
 from agents.exercise_writer import ExerciseWriterAgent, ExerciseWriterGate
 from agents.fact_checker import FactChecker, FactCheckerAgent
@@ -34,6 +35,8 @@ __all__ = [
     "ChapterWriter",
     "CitationChecker",
     "CitationCheckerAgent",
+    "ConsistencyCheckerAgent",
+    "ConsistencyGate",
     "DirectorSettings",
     "ExampleWriterAgent",
     "ExampleWriterGate",

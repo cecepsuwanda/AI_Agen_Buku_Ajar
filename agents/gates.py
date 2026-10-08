@@ -1,11 +1,10 @@
 """Registri gate pipeline (§27) — jembatan antara rantai 10 tahap dan MVP.
 
-Blueprint §27 mendefinisikan rantai sepuluh status, sedangkan build ini baru
-mengisi sebagiannya. Rantai itu tidak boleh diciutkan agar cocok dengan apa
-yang sudah ada — status yang dihapus hari ini harus dimigrasikan di seluruh
-``state/*.json`` besok. Karena itu rantai tetap utuh, dan tahap yang belum
-berpenghuni diisi oleh :class:`PassThroughGate`: gate yang tidak memanggil LLM,
-tidak memeriksa apa pun, dan **mencatat dirinya sebagai dilewati**.
+Blueprint §27 mendefinisikan rantai status yang panjang, dan rantai itu tidak
+boleh diciutkan agar cocok dengan apa yang sudah ada: status yang dihapus hari
+ini harus dimigrasikan di seluruh ``state/*.json`` besok. Karena itu rantai
+tetap utuh, dan setiap tahapnya diisi gate yang benar-benar memeriksa sesuatu —
+satu per berkas, satu per tahap.
 
 Itulah yang membuat ``BookDirector`` tidak perlu tahu gate mana yang ada. Ia
 mengulang daftar dari ``config.yaml`` dan memanggil ``evaluate`` pada setiap
@@ -14,6 +13,11 @@ gate. Konsekuensinya (OCP, dalam bentuk yang dapat diperiksa):
 * Menambahkan pedagogy reviewer = berkas baru + satu baris di ``config.yaml``.
   Nol suntingan pada ``book_director.py``, ``base.py``, atau agent mana pun.
 * Mengganti model peninjau = mengedit ``config.yaml``. Nol suntingan pada kode.
+
+:class:`PassThroughGate` tetap ada meski tidak ada lagi tahap yang belum
+berpenghuni, dan ia bukan sisa: ia yang dipakai gate LaTeX ketika fiturnya
+dimatikan (§25, §26). Bab yang melewati tahap tanpa dikerjakan harus terlihat
+melewatinya — dan itu tetap berlaku, apa pun sebabnya.
 
 **Registri ini ditulis sekali saat import, lalu hanya dibaca.** Ia memang
 ``dict`` tingkat modul, tetapi bukan keadaan global yang termutasi di tengah
@@ -78,7 +82,7 @@ class GateContext:
     #:
     #: ``None`` berarti gate §25 mengembalikan pass-through, bukan bahwa gate-nya
     #: hilang: bab yang melewati tahap ini tanpa dikerjakan harus terlihat
-    #: melewatinya, sama seperti tahap yang belum berpenghuni.
+    #: melewatinya, sama seperti tahap yang dimatikan karena perkakasnya tidak ada.
     latex: LatexArtifacts | None = None
 
     #: Perkakas kompilasi LaTeX (§26), atau ``None`` bila tidak ada.
@@ -188,14 +192,18 @@ class PassThroughGate:
     "diperiksa" padahal tidak ada yang memeriksanya. Bab yang lolos tanpa
     pemeriksaan harus terlihat sebagai bab yang lolos tanpa pemeriksaan.
 
-    Catatan yang dibawanya menyebutkan bahwa tahap ini belum diimplementasikan,
-    sehingga pembaca ``state/chapterNN.json`` tahu persis apa yang terjadi.
+    Catatan yang dibawanya menyebutkan bahwa tahap ini tidak dikerjakan pada
+    jalankan ini, sehingga pembaca ``state/chapterNN.json`` tahu persis apa yang
+    terjadi. Pemanggil yang tahu **alasan**nya — fitur yang dimatikan, misalnya —
+    mengirim catatannya sendiri lewat ``note``: "LaTeX dimatikan" jauh lebih
+    berguna daripada "belum diimplementasikan" bagi orang yang membacanya enam
+    bulan kemudian.
     """
 
     def __init__(self, *, name: str, produces: ChapterStatus, note: str = "") -> None:
         self.name = name
         self.produces = produces
-        self._note = note or f"Tahap {produces} belum diimplementasikan pada MVP ini."
+        self._note = note or f"Tahap {produces} tidak dikerjakan pada jalankan ini."
 
     def evaluate(self, record: ChapterRecord, book: BookState) -> ReviewResult:
         """Loloskan bab tanpa memeriksa apa pun, dan katakan demikian."""
@@ -209,62 +217,7 @@ class PassThroughGate:
         )
 
 
-def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
-    """Bangun factory pass-through untuk satu status.
-
-    Ditulis sebagai fungsi penghasil, bukan satu kelas per tahap: kelas-kelas
-    yang isinya identik hanya akan menyembunyikan bahwa semuanya memang
-    placeholder — dan jumlahnya berkurang setiap tahap, sehingga angka yang
-    ditulis di sini akan basi lebih cepat daripada isinya.
-    """
-
-    def factory(context: GateContext) -> ReviewGate:
-        del context
-        return PassThroughGate(name=name, produces=produces)
-
-    return factory
-
-
-#: Tahap §27 yang **belum** berpenghuni, dalam urutan rantai.
-#:
-#: Terdaftar sekarang meskipun belum ada di ``config.yaml``, supaya
-#: mengaktifkannya nanti benar-benar hanya satu baris konfigurasi:
-#:
-#:     pipeline:
-#:       gates: [consistency_checked, reviewer]
-#:
-#: Ketika agent sungguhnya tiba, ia mendaftar dengan namanya sendiri dan **baris
-#: di bawah dihapus** — bukan ditimpa. Penghapusan itu bagian dari pekerjaan
-#: tahapnya, bukan akibat sampingnya, dan itulah gunanya ``register_gate``
-#: menolak nama yang sudah terpakai: ia memaksa keputusan sadar, bukan
-#: pembiaran. Yang pertama menjalaninya adalah ``citation_checked``, yang
-#: digantikan ``citation_checker`` pada Tahap 4 (§22); yang kedua
-#: ``fact_checked``, digantikan ``fact_checker`` pada Tahap 5 (§21); yang ketiga
-#: ``latex_generated``, digantikan ``latex_writer`` pada Tahap 6 (§25); yang
-#: keempat ``latex_compiled``, digantikan ``latex_qa`` pada Tahap 7 (§26); yang
-#: kelima ``pedagogy_reviewed``, digantikan ``pedagogy_reviewer`` pada Tahap 8
-#: (§23).
-PLACEHOLDER_GATES: tuple[tuple[str, ChapterStatus], ...] = (
-    ("consistency_checked", ChapterStatus.CONSISTENCY_CHECKED),
-)
-
-
-def _register_placeholders() -> None:
-    """Isi registri dengan seluruh tahap yang belum berpenghuni.
-
-    Ditulis sebagai fungsi, bukan loop di tingkat modul, supaya tidak ada nama
-    sementara (``_gate_name``) yang tertinggal di namespace paket ini — nama
-    seperti itu terlihat seperti keadaan global bagi siapa pun yang membaca.
-    """
-    for name, produces in PLACEHOLDER_GATES:
-        register_gate(name)(_passthrough_factory(name, produces))
-
-
-_register_placeholders()
-
-
 __all__ = [
-    "PLACEHOLDER_GATES",
     "GateContext",
     "GateFactory",
     "PassThroughGate",

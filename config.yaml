@@ -40,8 +40,8 @@ book:
 pipeline:
   # Rantai status di build ini berisi 12 tahap: sepuluh dari §27, ditambah dua
   # tahap penulisan yang blueprint sendiri letakkan sesudah Chapter Writer
-  # (§19 Example Agent, §20 Exercise Agent). Hanya gate yang terisi yang
-  # didaftarkan di sini; sisanya dipegang placeholder di agents/gates.py.
+  # (§19 Example Agent, §20 Exercise Agent). Seluruh tahap yang menghasilkan
+  # status kini punya gate-nya sendiri — tidak ada lagi placeholder.
   # Menambah gate baru = daftarkan di agents/gates.py + tambahkan namanya di sini.
   #
   # URUTAN PENTING dan tidak dapat ditukar. `validate_gates` menolak gate yang
@@ -64,7 +64,13 @@ pipeline:
   # ada — tanpa keduanya tidak ada yang dapat dinilai tentang contoh dan
   # latihan. Ia menolak tanpa memanggil model bila salah satu anak tangga
   # tangganya terbukti absen, dan itu memang jalur yang paling sering dipakai.
-  gates: [example_writer, exercise_writer, fact_checker, citation_checker, pedagogy_reviewer, reviewer, latex_writer, latex_qa]
+  #
+  # `consistency_checker` (§24) berdiri SESUDAH pedagogi dan SEBELUM peninjau
+  # akhir: ia satu-satunya gate yang membandingkan bab dengan seluruh buku,
+  # sehingga dialah yang mencatat istilah bab ini ke `BookState.terminology`
+  # untuk dibaca bab-bab berikutnya. Urutan itu menentukan apakah bab ke-7
+  # dapat melihat istilah bab ke-2.
+  gates: [example_writer, exercise_writer, fact_checker, citation_checker, pedagogy_reviewer, consistency_checker, reviewer, latex_writer, latex_qa]
 
 # -----------------------------------------------------------------------------
 # RAG (§10, §13). Indeks dibangun perintah tersendiri: `ai-book ingest`.

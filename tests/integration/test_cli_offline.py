@@ -238,15 +238,22 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
     # karena latihan adalah prosa. Nomor berkasnyalah yang membuktikan keduanya
     # berada di antara penulis dan peninjau — bukan sebelum, bukan sesudah.
     #
-    # ``06-reviewer`` lalu ``07-reviewer``: DUA gate yang berbeda memakai peran
-    # yang sama. Yang pertama adalah ``pedagogy_reviewer`` (§23), yang berdiri
-    # SESUDAH contoh dan latihan — tanpa keduanya tidak ada yang dapat dinilai
-    # tentang keduanya. Nomor berkasnyalah yang membuktikan urutan itu.
+    # ``06-reviewer``, ``07-reviewer``, lalu ``08-reviewer``: TIGA gate yang
+    # berbeda memakai peran yang sama, dan urutannya menentukan perilakunya.
+    # Yang pertama ``pedagogy_reviewer`` (§23), yang berdiri SESUDAH contoh dan
+    # latihan — tanpa keduanya tidak ada yang dapat dinilai tentang keduanya.
+    # Yang kedua ``consistency_checker`` (§24), satu-satunya gate yang membaca bab
+    # terhadap SELURUH buku; dialah yang mencatat istilah bab ini ke
+    # ``BookState.terminology``, sehingga urutannya menentukan apakah bab ke-7
+    # dapat melihat istilah bab ke-2. Yang ketiga peninjau akhir (§27), dan ia
+    # sengaja yang terakhir di antara ketiganya: keputusannya adalah keputusan
+    # sistem, yang seharusnya melihat bab setelah pedagogi dan konsistensinya
+    # dinilai. Nomor berkasnyalah yang membuktikan ketiga urutan itu.
     #
-    # ``08-latex``: §25 berada SESUDAH peninjau, sesuai rantai §27
+    # ``09-latex``: §25 berada SESUDAH peninjau, sesuai rantai §27
     # (LATEX_GENERATED setelah REVIEWED).
     #
-    # ``09-latex`` dan ``10-latex`` bukan pengulangan yang tidak disengaja.
+    # ``10-latex`` dan ``11-latex`` bukan pengulangan yang tidak disengaja.
     # ``SchemaEchoChatModel`` menyintesis bab dari skema saja — ia tidak melihat
     # daftar kunci sitasi yang diberikan, jadi ``citations`` yang disintesiskannya
     # tidak pernah muncul di ``body_tex``, dan tangga perbaikan §25 berjalan
@@ -262,9 +269,10 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
         "05-writer.txt",
         "06-reviewer.txt",
         "07-reviewer.txt",
-        "08-latex.txt",
+        "08-reviewer.txt",
         "09-latex.txt",
         "10-latex.txt",
+        "11-latex.txt",
     }
 
     # Setiap prompt memuat system, user, skema format= mentah, dan model+opsi
@@ -465,8 +473,8 @@ def test_dry_run_on_a_planned_book_mirrors_the_plan_read_only(
     # Rencana tidak pernah disusun ulang: ia dibaca dari salinan, bukan dari model.
     # Perencana **buku** karena itu tidak dipanggil — tetapi perincian per bab tetap
     # dikerjakan, sebab ia bekerja pada bab, bukan pada buku (§16), dan tahap
-    # contoh (§19), latihan (§20), serta LaTeX (§25) ikut berjalan karena ketiganya
-    # juga bekerja pada bab.
+    # contoh (§19), latihan (§20), pemeriksaan konsistensi (§24), serta LaTeX (§25)
+    # ikut berjalan karena keempatnya juga bekerja pada bab.
     assert {_role_of(name) for name in _dry_run_prompts(layout)} == {
         "chapter_planner",
         "code",

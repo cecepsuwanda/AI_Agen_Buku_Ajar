@@ -67,6 +67,7 @@ from domain.errors import (
 from domain.ports import ChapterArtifacts, Reporter, Researcher, ReviewGate, StateStore
 from domain.rendering import render_chapter_markdown
 from domain.rules import (
+    approved_terminology,
     find_chapter,
     pending_numbers,
     remembered_citations,
@@ -686,16 +687,23 @@ class BookDirector:
         * ``citations`` — sumber yang sudah lolos pemeriksaan sitasi. Inilah yang
           membuat §22 dapat ditegakkan lintas bab (lihat
           :func:`~domain.rules.remembered_citations`).
+        * ``terminology`` — istilah yang glosariumnya disetujui Consistency
+          Checker (§24). Inilah yang membuat contoh §24 sendiri dapat ditegakkan:
+          *finite automaton* di bab 2 hanya dapat dibandingkan dengan istilah di
+          bab 7 bila istilah bab 2 diingat (lihat
+          :func:`~domain.rules.approved_terminology`).
 
-        Keduanya ditulis dalam **satu** pemuatan dan satu penyimpanan. Dua
+        Ketiganya ditulis dalam **satu** pemuatan dan satu penyimpanan. Dua
         pemanggilan terpisah akan meninggalkan state yang setengah diperbarui
         bila prosesnya terputus di antaranya, dan tidak ada yang tahu urutan mana
         yang benar.
 
-        ``terminology`` sengaja masih tidak diisi: mengekstrak istilah butuh
-        Consistency Checker (§24) yang belum ada, dan menebaknya dari prosa akan
-        mengisi memori bersama dengan entri yang salah — lebih buruk daripada
-        kosong, karena agent berikutnya akan mempercayainya.
+        ``terminology`` berasal dari record, bukan dari ``book.reviews``: gate §24
+        menitipkan glosariumnya ke ``ReviewResult`` yang tersimpan bersama bab itu,
+        persis seperti cara :func:`~domain.rules.remembered_citations` mengambil
+        sumber dari paket riset record. Yang diingat buku karena itu selalu
+        **kesimpulan gate**, bukan tebakan dari prosa — dan gate itu hanya
+        menyimpannya bila vonis sistemnya lulus.
         """
         book = self._state.load_book()
         if book is None:
@@ -713,6 +721,12 @@ class BookDirector:
                 update={
                     "citations": remembered_citations(updated.citations, record.research),
                 }
+            )
+
+        terms = approved_terminology(record)
+        if terms:
+            updated = updated.model_copy(
+                update={"terminology": {**updated.terminology, **terms}}
             )
 
         # Dibandingkan dengan **nilai**, bukan identitas: paket riset terdegradasi

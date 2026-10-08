@@ -222,7 +222,7 @@ def _build_latex_writer(context: GateContext) -> ReviewGate:
     terlihat sebagai bab yang **melewatinya**, bukan sebagai bab yang tidak
     pernah punya tahap itu. Karena itu yang dikembalikan adalah
     :class:`~agents.gates.PassThroughGate` dengan ``skipped=True`` — jejak yang
-    sama dengan tahap yang belum berpenghuni.
+    sama dengan tahap yang dimatikan karena perkakasnya tidak ada.
 
     Konsekuensi kedua, dan itu yang membuat percabangan ini ada di sini alih-alih
     di ``book_director.py``: peran ``latex`` **tidak dipanggil** ketika LaTeX

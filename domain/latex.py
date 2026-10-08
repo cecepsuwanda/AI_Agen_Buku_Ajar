@@ -90,6 +90,15 @@ _SLUG_MAX = 40
 #: dimulai tanda hubung adalah kunci yang tidak sah.
 _FALLBACK_SLUG = "sumber"
 
+#: Pola nama berkas potongan bab, dalam dua arah.
+#:
+#: Ditulis sebagai konstanta, bukan disebar sebagai f-string dan potongan
+#: literal: :func:`chapter_latex_filename` dan
+#: :func:`chapter_number_from_filename` adalah kebalikan satu sama lain, dan
+#: keduanya harus berbicara tentang pola yang sama persis.
+_CHAPTER_PREFIX = "chapter"
+_CHAPTER_SUFFIX = ".tex"
+
 # FNV-1a 32-bit.
 #
 # Bukan ``hash()`` bawaan Python: nilainya **diacak per proses** untuk ``str``
@@ -326,7 +335,38 @@ def chapter_latex_filename(number: int) -> str:
     ``output/latex/chapters/chapter01.tex`` selalu berbicara tentang bab yang
     sama.
     """
-    return f"chapter{number:02d}.tex"
+    return f"{_CHAPTER_PREFIX}{number:02d}{_CHAPTER_SUFFIX}"
+
+
+def chapter_number_from_filename(filename: str) -> int | None:
+    """Nomor bab dari nama berkas ``chapterNN.tex``, atau ``None`` (MURNI).
+
+    Kebalikan dari :func:`chapter_latex_filename`, dan diletakkan tepat di
+    sebelahnya supaya kedua arah penamaan itu tidak dapat menyimpang tanpa
+    terlihat: menambahkan nol di depan di satu arah saja akan membuat berkasnya
+    ditemukan oleh ``export`` tetapi tidak dikenali lagi oleh pembacanya.
+
+    ``None`` adalah jawaban yang benar untuk berkas yang bukan potongan bab —
+    ``main.tex``, ``preamble.tex``, atau bahan rujukan apa pun. Mengembalikan
+    nomor tebakan untuk berkas seperti itu akan menempelkan konsep-konsepnya pada
+    bab yang tidak pernah memuatnya.
+
+    :param filename: nama berkas saja (``Path.name``), bukan jalurnya. Nama yang
+        memuat pemisah direktori tidak dikenali — membiarkannya lolos berarti
+        satu-satunya pemanggil yang memakai jalur penuh akan mendapat nomor yang
+        benar secara kebetulan, lalu salah pada bentuk jalur yang lain.
+    """
+    name = filename.strip()
+    if not name.endswith(_CHAPTER_SUFFIX):
+        return None
+    stem = name[: -len(_CHAPTER_SUFFIX)]
+    if not stem.startswith(_CHAPTER_PREFIX):
+        return None
+    digits = stem[len(_CHAPTER_PREFIX) :]
+    if not digits.isascii() or not digits.isdigit():
+        return None
+    number = int(digits)
+    return number if number >= 1 else None
 
 
 # ---------------------------------------------------------------------------
@@ -967,6 +1007,7 @@ __all__ = [
     "build_problems",
     "chapter_citations",
     "chapter_latex_filename",
+    "chapter_number_from_filename",
     "citation_key",
     "crossref_findings",
     "escape_latex",

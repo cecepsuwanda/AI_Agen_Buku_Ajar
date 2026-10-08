@@ -50,6 +50,7 @@ from domain.errors import (
     ModelUnavailableError,
     StateWriteError,
 )
+from domain.graph import CHECKS
 from domain.ports import Researcher
 from domain.state import BookState
 from domain.structured import example_instance, strict_schema
@@ -154,12 +155,18 @@ def build_director(
     writer: ChapterWriter | None = None,
     researcher: Researcher | None = None,
     settings: DirectorSettings | None = None,
+    gates: tuple[str, ...] = ("reviewer",),
 ) -> tuple[BookDirector, StaticModelProvider]:
     """Rakit direktur sungguhan dengan model palsu.
 
     Mengembalikan providernya juga, supaya tes dapat menghitung panggilan model.
     Tanpa itu, satu-satunya cara membuktikan resume tidak memanggil model adalah
     mengukur waktu — dan itu tes yang gagal di mesin yang lambat.
+
+    ``gates`` dapat dipersempit per tes. Rantai bawaan berkas ini sengaja hanya
+    ``reviewer``: tes yang tidak sedang memeriksa sebuah gate tidak perlu
+    membayarnya, dan yang lebih penting, hasilnya tidak berubah ketika gate itu
+    diperbaiki.
     """
     provider = StaticModelProvider(
         default=SchemaEchoChatModel(),  # type: ignore[arg-type]
@@ -168,8 +175,8 @@ def build_director(
         chapter_planner=chapter_planner_model,  # type: ignore[arg-type]
     )
 
-    gates = build_gates(
-        ("reviewer",),
+    built = build_gates(
+        gates,
         GateContext(router=provider, prompts=prompts, reporter=reporter),  # type: ignore[arg-type]
     )
 
@@ -180,7 +187,7 @@ def build_director(
         ),
         writer=writer or ChapterWriter(model=provider.chat("writer"), prompts=prompts),
         researcher=researcher or NullResearcher(),
-        gates=gates,
+        gates=built,
         state=state,
         artifacts=artifacts,
         reporter=reporter,
@@ -980,6 +987,81 @@ def test_the_sources_a_chapter_was_written_from_are_remembered_for_the_next_ones
     book = state.load_book()
     assert book is not None
     assert book.citations == {source: source}
+
+
+def consistency_verdict(*, glossary: dict[str, str]) -> str:
+    """Balasan gate §24 yang sah: kesembilan hal dijawab, dan glosariumnya terisi.
+
+    Kesembilan temuan wajib itu bukan kelengkapan yang dipaksakan tes ini,
+    melainkan syarat yang ditegakkan :func:`~domain.checking.GateReport.enforce_findings`:
+    vonis yang melewatkan satu hal §24 ditolak sistem, bukan oleh model yang
+    sama yang diminta menepatinya.
+    """
+    return json.dumps(
+        {
+            "approved": True,
+            "score": 9,
+            "feedback": [],
+            "findings": [
+                {"subject": name, "ok": True, "detail": "konsisten", "source": ""}
+                for name in CHECKS
+            ],
+            "glossary": [
+                {"term": term, "definition": definition}
+                for term, definition in glossary.items()
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def test_the_glossary_of_a_chapter_is_remembered_for_the_next_ones(
+    prompt_library: FilePromptLibrary,
+    state: JsonStateStore,
+    artifacts: MarkdownArtifacts,
+    reporter: RecordingReporter,
+) -> None:
+    """§24 hanya dapat ditegakkan lintas bab bila istilahnya diingat bersama.
+
+    Contoh §24 sendiri menuntut ini: *finite automaton* di bab 2 hanya dapat
+    dibandingkan dengan istilah di bab 7 bila istilah bab 2 masih ada saat bab 7
+    ditulis. Yang menyimpannya adalah :meth:`~agents.book_director.BookDirector._remember_chapter`,
+    dan tanpa tes ini jalur itu dapat putus tanpa satu pun tes lain menjadi merah —
+    gate §24 akan tetap lulus, glosariumnya tetap benar, dan buku tetap kehilangan
+    pembandingnya secara diam-diam.
+    """
+    seed_book(state, chapters=2)
+    second_glossary = {"regular expression": "Cara menuliskan himpunan string."}
+    reviewer = ScriptedChatModel(
+        [
+            consistency_verdict(glossary={"finite-state machine": "Mesin keadaan berhingga."}),
+            consistency_verdict(glossary=second_glossary),
+        ]
+    )
+    writer = ScriptedChatModel(
+        [draft_json("Bab satu."), draft_json("Bab dua.")]  # type: ignore[arg-type]
+    )
+    director, _ = build_director(
+        prompts=prompt_library,
+        state=state,
+        artifacts=artifacts,
+        reporter=reporter,
+        writer_model=writer,
+        reviewer_model=reviewer,
+        gates=("consistency_checker",),
+    )
+
+    director.run()
+
+    book = state.load_book()
+    assert book is not None
+    assert book.terminology == {
+        "finite-state machine": "Mesin keadaan berhingga.",
+        **second_glossary,
+    }
+
+    # Bukan hanya tersimpan: bab dua benar-benar **menerimanya** saat ditulis.
+    assert "finite-state machine" in writer.requests[1].user
 
 
 def test_research_stays_degraded_and_is_recorded_as_such(

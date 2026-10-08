@@ -493,7 +493,7 @@ def ingest(
     log_json: LogJsonOpt = None,
     references: ReferencesOpt = None,
 ) -> None:
-    """Bangun indeks vektor dari direktori bahan rujukan (§10, §13)."""
+    """Bangun ulang basis pengetahuan turunan: indeks vektor dan graf konsep (§10, §13, §14)."""
     raise typer.Exit(
         code=do_ingest(
             _params(

@@ -678,6 +678,28 @@ def remembered_citations(
     return {**existing, **added}
 
 
+def approved_terminology(record: ChapterRecord) -> Mapping[str, str]:
+    """Istilah yang **disetujui** gate untuk bab ini, urut review (MURNI).
+
+    Kembar dari :func:`remembered_citations`: §24 membandingkan bab baru dengan
+    seluruh state buku, sehingga istilah harus dapat bertahan melewati batas bab.
+    Yang berbeda hanyalah dari mana ia datang — sitasi dari paket riset, istilah
+    dari glosarium yang dikembalikan gate §24, sebab hanya pemeriksaan itulah yang
+    membaca bab terhadap seluruh buku.
+
+    Hanya review yang **lulus** yang dihitung. Bab yang ditolak gate §24 belum
+    tentu memakai istilahnya dengan benar; glosariumnya adalah catatan tentang
+    bab yang sedang menuju revisi, bukan tentang bab yang akan dibaca mahasiswa.
+    Review yang lebih baru menang atas yang lebih lama, dan itu memang yang benar:
+    revisi terakhirlah yang disetujui.
+    """
+    merged: dict[str, str] = {}
+    for review in record.reviews:
+        if review.approved:
+            merged.update(review.terminology)
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Vonis gate
 # ---------------------------------------------------------------------------

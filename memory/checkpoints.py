@@ -69,9 +69,9 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
 
     :raises StateWriteError: bila penulisan gagal.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(tmp, "w", encoding=encoding, newline="\n") as handle:
             handle.write(text)
         _replace_with_retry(tmp, path)

@@ -21,9 +21,10 @@ class ChapterStatus(StrEnum):
                 → CONSISTENCY_CHECKED → REVIEWED
                 → LATEX_GENERATED → LATEX_COMPILED → APPROVED
 
-    MVP hanya mengisi sebagian tahap. Status yang belum berpenghuni dilewati
-    oleh ``agents.gates.PassThroughGate`` dengan ``skipped=True``, sehingga
-    bentuk rantainya tetap setia pada §27 tanpa harus menulis 6 agent dulu.
+    Setiap tahap yang menghasilkan statusnya punya gate-nya sendiri; tahap yang
+    fiturnya dimatikan — mis. LaTeX pada mesin tanpa perkakasnya — dilewati oleh
+    ``agents.gates.PassThroughGate`` dengan ``skipped=True``, sehingga bentuk
+    rantainya tetap setia pada §27 tanpa menjalankan apa pun.
     """
 
     # --- Tahap perencanaan & penulisan ------------------------------------

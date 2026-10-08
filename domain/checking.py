@@ -40,6 +40,11 @@ hanya dapat dibuat program, karena ia membandingkan draf dengan dirinya sendiri,
 bukan dengan bahan. Bab yang jujur tetap melihat temuannya di laporan
 (``describe``), tetapi tidak dihukum karenanya. Lihat
 :meth:`GateReport.silent_failures`.
+
+Satu pemeriksa — konsistensi §24 — meminta satu hal lagi kepada model, dan
+karena itu punya vonisnya sendiri: :class:`ConsistencyVerdict` menambahkan
+``glossary`` pada bentuk yang sama. Ia tetap tinggal di berkas ini supaya kosakata
+keempat pemeriksa tetap satu, bukan supaya bentuknya dipaksa seragam.
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ from pydantic import Field
 
 from domain.base import FrozenModel
 from domain.chapter import Evidence, ReviewVerdict
+from domain.graph import TerminologyEntry
 
 
 class CheckJudgement(FrozenModel):
@@ -102,6 +108,25 @@ class CheckVerdict(FrozenModel):
     score: int = Field(default=0, ge=0, le=10)
     feedback: tuple[str, ...] = ()
     findings: tuple[CheckJudgement, ...] = ()
+
+
+class ConsistencyVerdict(CheckVerdict):
+    """Vonis pemeriksa konsistensi (§24), beserta glosarium bab yang diperiksanya.
+
+    Satu-satunya pemeriksa yang keluarannya lebih dari sekadar temuan, dan
+    alasannya bukan kenyamanan: §24 membandingkan bab baru dengan **seluruh**
+    state buku, sehingga satu-satunya tempat istilah buku dapat bertambah adalah
+    pemeriksaan ini. Tanpa ``glossary``, ``BookState.terminology`` akan tetap
+    kosong selamanya — dan contoh §24 sendiri (*finite automaton* di bab 2,
+    *finite-state machine* di bab 7) tidak akan pernah dapat ditemukan, sebab bab
+    ketujuh tidak punya apa pun untuk dibandingkan.
+
+    Yang menuliskannya ke memori bersama tetap program, bukan model: glosarium ini
+    hanya masuk ke ``BookState`` bila gate-nya **lulus** — lihat
+    :func:`~domain.rules.approved_terminology`.
+    """
+
+    glossary: tuple[TerminologyEntry, ...] = ()
 
 
 class CheckFinding(FrozenModel):
@@ -313,6 +338,7 @@ __all__ = [
     "CheckFinding",
     "CheckJudgement",
     "CheckVerdict",
+    "ConsistencyVerdict",
     "GateReport",
     "evidence_for",
     "unexamined",

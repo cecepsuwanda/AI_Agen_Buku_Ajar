@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from agents.gates import (
-    PLACEHOLDER_GATES,
     GateContext,
     PassThroughGate,
     build_gates,
@@ -62,14 +61,38 @@ def test_the_reviewer_gate_is_registered() -> None:
     assert "reviewer" in registered_gate_names()
 
 
-def test_every_uninhabited_chain_stage_has_a_placeholder() -> None:
-    """Rantai §27 tetap dapat dilalui utuh meski baru satu gate yang berpenghuni."""
+#: Nama gate yang **pernah** ada sebagai placeholder dan kini sudah tidak.
+#:
+#: Daftarnya dipertahankan justru karena perannya sudah habis: ``register_gate``
+#: menolak nama yang terdaftar dua kali, jadi setiap agent sungguhan **wajib**
+#: menghapus placeholder-nya lebih dulu. Nama yang tertinggal di registri berarti
+#: penghapusan itu belum terjadi — dan gate yang terdaftar dengan nama lama akan
+#: dilewati ``build_gates`` hanya bila ada yang menuliskan nama itu di
+#: ``config.yaml``.
+RETIRED_GATE_NAMES: tuple[str, ...] = (
+    "citation_checked",
+    "consistency_checked",
+    "fact_checked",
+    "latex_compiled",
+    "latex_generated",
+    "pedagogy_reviewed",
+)
+
+
+def test_every_chain_stage_is_inhabited_by_a_real_gate() -> None:
+    """Tidak ada lagi tahap yang dipegang placeholder.
+
+    Sejak Tahap 9, setiap status di rantai §27 punya gate yang benar-benar
+    memeriksa sesuatu. Yang tersisa hanyalah nama lamanya, dan nama itu harus
+    benar-benar hilang — bukan sekadar tidak dipakai.
+    """
     registered = registered_gate_names()
 
-    assert all(name in registered for name, _ in PLACEHOLDER_GATES)
+    stale = [name for name in RETIRED_GATE_NAMES if name in registered]
+    assert not stale, f"nama placeholder yang belum dihapus: {', '.join(stale)}"
 
 
-def test_placeholder_names_are_sorted_in_the_report() -> None:
+def test_gate_names_are_sorted_in_the_report() -> None:
     """``registered_gate_names`` dipakai di pesan kesalahan — ia harus deterministik."""
     names = registered_gate_names()
 
@@ -102,7 +125,7 @@ def test_registering_an_existing_name_is_refused() -> None:
 # ---------------------------------------------------------------------------
 def test_build_gates_preserves_the_configured_order(context: GateContext) -> None:
     """Urutan di ``pipeline.gates`` adalah urutan tahap — bukan detail kosmetik."""
-    names = ("fact_checker", "reviewer", "consistency_checked")
+    names = ("fact_checker", "reviewer", "consistency_checker")
 
     gates = build_gates(names, context)
 
@@ -149,35 +172,39 @@ def test_pass_through_gate_marks_itself_as_skipped(book: BookState) -> None:
     result = gate.evaluate(ChapterRecord(number=1), book)
 
     assert result.skipped is True
-    assert any("belum diimplementasikan" in note for note in result.feedback)
+    assert any("tidak dikerjakan pada jalankan ini" in note for note in result.feedback)
 
 
-def test_placeholder_gate_produces_the_status_it_stands_for(context: GateContext) -> None:
-    """Nama placeholder dan status yang dicapainya harus sepadan.
+def test_pass_through_gate_reports_the_reason_its_caller_gave(book: BookState) -> None:
+    """Pemanggil yang tahu alasannya mengirim catatannya sendiri.
 
-    Kalau tidak, rantai §27 tetap "terlalui" tetapi di tempat yang salah — dan
-    ``validate_gates`` tidak akan menangkapnya, karena ia hanya memeriksa arah,
-    bukan maksud.
+    "LaTeX dimatikan" jauh lebih berguna bagi pembaca ``state/chapterNN.json``
+    enam bulan kemudian daripada catatan bawaan yang hanya mengatakan bahwa
+    tahapnya tidak dikerjakan.
     """
-    gates = build_gates(tuple(name for name, _ in PLACEHOLDER_GATES), context)
+    gate = PassThroughGate(
+        name="latex_qa",
+        produces=ChapterStatus.LATEX_COMPILED,
+        note="latexmk tidak ditemukan di PATH.",
+    )
 
-    for (expected_name, expected_status), gate in zip(PLACEHOLDER_GATES, gates, strict=True):
-        assert gate.name == expected_name
-        assert gate.produces is expected_status
+    result = gate.evaluate(ChapterRecord(number=1), book)
+
+    assert result.feedback == ("latexmk tidak ditemukan di PATH.",)
 
 
 #: Seluruh gate yang menutup rantai §27 pada hari ini, dalam urutan rantai.
 #:
 #: Daftarnya sengaja literal, seperti ``EXPECTED_PROMPTS`` di
-#: ``tests/unit/test_prompting.py``: setiap kali sebuah placeholder digantikan
-#: agent sungguhan (Tahap 4 menggantikan ``citation_checked`` dengan
-#: ``citation_checker``, Tahap 5 menggantikan ``fact_checked`` dengan
-#: ``fact_checker``, Tahap 6 menggantikan ``latex_generated`` dengan
-#: ``latex_writer``, Tahap 7 menggantikan ``latex_compiled`` dengan
-#: ``latex_qa``, Tahap 8 menggantikan ``pedagogy_reviewed`` dengan
-#: ``pedagogy_reviewer``), daftar ini harus disunting — dan suntingan itu adalah
-#: keputusan sadar, bukan pembiaran. Menurunkannya dari ``PLACEHOLDER_GATES``
-#: justru akan menyembunyikan pergantian itu.
+#: ``tests/unit/test_prompting.py``: setiap kali sebuah tahap berganti pemilik
+#: (Tahap 4 menggantikan ``citation_checked`` dengan ``citation_checker``, Tahap 5
+#: menggantikan ``fact_checked`` dengan ``fact_checker``, Tahap 6 menggantikan
+#: ``latex_generated`` dengan ``latex_writer``, Tahap 7 menggantikan
+#: ``latex_compiled`` dengan ``latex_qa``, Tahap 8 menggantikan
+#: ``pedagogy_reviewed`` dengan ``pedagogy_reviewer``, Tahap 9 menggantikan
+#: ``consistency_checked`` dengan ``consistency_checker``), daftar ini harus
+#: disunting — dan suntingan itu adalah keputusan sadar, bukan pembiaran.
+#: Menurunkannya dari registri justru akan menyembunyikan pergantian itu.
 #:
 #: ``latex_writer`` dan ``latex_qa`` di sini dibangun dengan ``latex=None``,
 #: sehingga yang terpasang adalah pass-through keduanya. Yang diuji oleh tes di
@@ -188,7 +215,7 @@ CHAIN_GATES: tuple[str, ...] = (
     "fact_checker",
     "citation_checker",
     "pedagogy_reviewer",
-    "consistency_checked",
+    "consistency_checker",
     "reviewer",
     "latex_writer",
     "latex_qa",
@@ -209,11 +236,13 @@ def test_every_built_gate_advances_the_chain_legally(context: GateContext) -> No
 
 
 def test_the_full_chain_can_be_walked_by_gates_alone(context: GateContext) -> None:
-    """Seluruh rantai §27 — dari DRAFTED sampai APPROVED — punya gate yang mencapainya.
+    """Seluruh tahap pemeriksaan §27 punya gate yang mencapainya.
 
-    Inilah bukti bahwa MVP tidak menciutkan rantai: yang belum ada hanyalah
-    isinya, bukan bentuknya. Ketika agent sungguhnya tiba, yang berubah hanya
-    kelas di balik satu nama gate.
+    Inilah bukti bahwa rantainya utuh dan tidak diciutkan: yang diuji bukan
+    apakah gate-nya pintar, melainkan apakah setiap statusnya benar-benar
+    dihasilkan oleh sesuatu. ``latex_generated`` dan ``latex_compiled`` di sini
+    datang dari pass-through, karena ``context.latex`` bernilai ``None`` — dan
+    itu memang yang terjadi pada mesin tanpa LaTeX.
     """
     reachable = {gate.produces for gate in build_gates(CHAIN_GATES, context)}
 

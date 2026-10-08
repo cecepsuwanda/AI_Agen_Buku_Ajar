@@ -21,6 +21,7 @@ from domain.book import ChapterSpec
 from domain.chapter import ChapterRecord, Evidence, ResearchPackage, ReviewResult
 from domain.document import Document
 from domain.enums import ChapterStatus
+from domain.graph import ConceptGraph
 from domain.latex import LatexBuildResult
 from domain.state import BookState
 
@@ -416,4 +417,33 @@ class Retriever(Protocol):
 
     def retrieve(self, query: str, *, limit: int = 8) -> tuple[Evidence, ...]:
         """Cari bukti yang relevan dengan ``query``, terbaik lebih dulu."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Knowledge graph (§14)
+# ---------------------------------------------------------------------------
+class GraphStore(Protocol):
+    """Port penyimpanan graf konsep (§14).
+
+    Dua method, dan keduanya menyentuh **seluruh** graf. Itu disengaja: graf di
+    sini berisi puluhan konsep, ia dibangun ulang dari bahan setiap kali
+    ``ingest`` dijalankan, dan tidak ada satu pun operasi yang menyunting satu
+    simpul. Port yang menawarkan ``add_node``/``add_edge`` akan menuntut setiap
+    pemakainya menyusun grafnya sendiri dari bagian-bagian — pekerjaan yang justru
+    sudah dilakukan :func:`~domain.graph.build_graph` secara murni, dan yang lebih
+    baik diuji tanpa berkas.
+
+    Berbeda dari :class:`Retriever` yang dibaca setiap bab, graf ini dibaca
+    perintah yang membangunnya. Karena itu ``load`` mengembalikan graf **kosong**
+    alih-alih melempar bila belum ada: graf yang belum dibangun bukan kerusakan,
+    ia hanya belum dibangun — sama seperti indeks vektor yang belum di-``ingest``.
+    """
+
+    def load(self) -> ConceptGraph:
+        """Baca graf tersimpan; graf kosong bila belum ada atau tidak terbaca."""
+        ...
+
+    def save(self, graph: ConceptGraph) -> None:
+        """Tulis seluruh graf, menimpa yang lama."""
         ...
