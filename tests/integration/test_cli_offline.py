@@ -238,10 +238,15 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
     # karena latihan adalah prosa. Nomor berkasnyalah yang membuktikan keduanya
     # berada di antara penulis dan peninjau — bukan sebelum, bukan sesudah.
     #
-    # ``06-reviewer`` lalu ``07-latex``: §25 berada SESUDAH peninjau, sesuai
-    # rantai §27 (LATEX_GENERATED setelah REVIEWED).
+    # ``06-reviewer`` lalu ``07-reviewer``: DUA gate yang berbeda memakai peran
+    # yang sama. Yang pertama adalah ``pedagogy_reviewer`` (§23), yang berdiri
+    # SESUDAH contoh dan latihan — tanpa keduanya tidak ada yang dapat dinilai
+    # tentang keduanya. Nomor berkasnyalah yang membuktikan urutan itu.
     #
-    # ``08-latex`` dan ``09-latex`` bukan pengulangan yang tidak disengaja.
+    # ``08-latex``: §25 berada SESUDAH peninjau, sesuai rantai §27
+    # (LATEX_GENERATED setelah REVIEWED).
+    #
+    # ``09-latex`` dan ``10-latex`` bukan pengulangan yang tidak disengaja.
     # ``SchemaEchoChatModel`` menyintesis bab dari skema saja — ia tidak melihat
     # daftar kunci sitasi yang diberikan, jadi ``citations`` yang disintesiskannya
     # tidak pernah muncul di ``body_tex``, dan tangga perbaikan §25 berjalan
@@ -256,9 +261,10 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
         "04-code.txt",
         "05-writer.txt",
         "06-reviewer.txt",
-        "07-latex.txt",
+        "07-reviewer.txt",
         "08-latex.txt",
         "09-latex.txt",
+        "10-latex.txt",
     }
 
     # Setiap prompt memuat system, user, skema format= mentah, dan model+opsi

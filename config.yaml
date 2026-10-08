@@ -59,7 +59,12 @@ pipeline:
   # saja ditulis `latex_writer`, dan bila gagal ia memperbaiki lebih dulu
   # sebelum menolak. Ia menjadi pass-through bila `latex.enabled: false` ATAU
   # bila `latexmk` tidak ada di PATH.
-  gates: [example_writer, exercise_writer, fact_checker, citation_checker, reviewer, latex_writer, latex_qa]
+  #
+  # `pedagogy_reviewer` menilai tangga penyajian §23 SESUDAH contoh dan latihan
+  # ada — tanpa keduanya tidak ada yang dapat dinilai tentang contoh dan
+  # latihan. Ia menolak tanpa memanggil model bila salah satu anak tangga
+  # tangganya terbukti absen, dan itu memang jalur yang paling sering dipakai.
+  gates: [example_writer, exercise_writer, fact_checker, citation_checker, pedagogy_reviewer, reviewer, latex_writer, latex_qa]
 
 # -----------------------------------------------------------------------------
 # RAG (§10, §13). Indeks dibangun perintah tersendiri: `ai-book ingest`.

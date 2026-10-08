@@ -19,6 +19,7 @@ from agents.fact_checker import FactChecker, FactCheckerAgent
 from agents.gates import PassThroughGate, build_gates, register_gate, registered_gate_names
 from agents.latex_qa import LatexQAGate, LatexRepairAgent
 from agents.latex_writer import LatexWriterAgent, LatexWriterGate
+from agents.pedagogy_reviewer import PedagogyGate, PedagogyReviewerAgent
 from agents.planner import BookPlanner
 from agents.researcher import NullResearcher, RagResearcher
 from agents.reviewer import ChapterReviewer, ChapterReviewerAgent
@@ -46,6 +47,8 @@ __all__ = [
     "LatexWriterGate",
     "NullResearcher",
     "PassThroughGate",
+    "PedagogyGate",
+    "PedagogyReviewerAgent",
     "RagResearcher",
     "StructuredAgent",
     "build_gates",

@@ -20,6 +20,7 @@ import pytest
 from app.prompting import FilePromptLibrary
 from agents.context import evidence_lines
 from domain.chapter import Evidence, ResearchPackage
+from domain.pedagogy import LADDER
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
@@ -193,6 +194,14 @@ def prompt_contexts(
             "revision": 1,
             "feedback": ("Sub-bab 2.1 belum menjelaskan notasi Big-O.",),
             "current_draft_json": '{"title": "Analisis Kompleksitas"}',
+        },
+        "pedagogy.chapter": {
+            **common,
+            # Tangga §23 dikirim sebagai daftar periksa, bukan sebagai prosa
+            # instruksi: yang harus dijawab satu per satu adalah anak tangganya,
+            # dan jumlahnya diuji di ``tests/unit/test_pedagogy.py``.
+            "ladder": LADDER,
+            "draft_json": '{"title": "Analisis Kompleksitas"}',
         },
         "reviewer.chapter": {
             **common,

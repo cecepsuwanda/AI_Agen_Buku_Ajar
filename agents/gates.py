@@ -231,7 +231,7 @@ def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
 #: mengaktifkannya nanti benar-benar hanya satu baris konfigurasi:
 #:
 #:     pipeline:
-#:       gates: [pedagogy_reviewed, reviewer]
+#:       gates: [consistency_checked, reviewer]
 #:
 #: Ketika agent sungguhnya tiba, ia mendaftar dengan namanya sendiri dan **baris
 #: di bawah dihapus** — bukan ditimpa. Penghapusan itu bagian dari pekerjaan
@@ -241,9 +241,10 @@ def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
 #: digantikan ``citation_checker`` pada Tahap 4 (§22); yang kedua
 #: ``fact_checked``, digantikan ``fact_checker`` pada Tahap 5 (§21); yang ketiga
 #: ``latex_generated``, digantikan ``latex_writer`` pada Tahap 6 (§25); yang
-#: keempat ``latex_compiled``, digantikan ``latex_qa`` pada Tahap 7 (§26).
+#: keempat ``latex_compiled``, digantikan ``latex_qa`` pada Tahap 7 (§26); yang
+#: kelima ``pedagogy_reviewed``, digantikan ``pedagogy_reviewer`` pada Tahap 8
+#: (§23).
 PLACEHOLDER_GATES: tuple[tuple[str, ChapterStatus], ...] = (
-    ("pedagogy_reviewed", ChapterStatus.PEDAGOGY_REVIEWED),
     ("consistency_checked", ChapterStatus.CONSISTENCY_CHECKED),
 )
 

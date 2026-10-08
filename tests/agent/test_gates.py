@@ -174,7 +174,8 @@ def test_placeholder_gate_produces_the_status_it_stands_for(context: GateContext
 #: ``citation_checker``, Tahap 5 menggantikan ``fact_checked`` dengan
 #: ``fact_checker``, Tahap 6 menggantikan ``latex_generated`` dengan
 #: ``latex_writer``, Tahap 7 menggantikan ``latex_compiled`` dengan
-#: ``latex_qa``), daftar ini harus disunting — dan suntingan itu adalah
+#: ``latex_qa``, Tahap 8 menggantikan ``pedagogy_reviewed`` dengan
+#: ``pedagogy_reviewer``), daftar ini harus disunting — dan suntingan itu adalah
 #: keputusan sadar, bukan pembiaran. Menurunkannya dari ``PLACEHOLDER_GATES``
 #: justru akan menyembunyikan pergantian itu.
 #:
@@ -186,7 +187,7 @@ def test_placeholder_gate_produces_the_status_it_stands_for(context: GateContext
 CHAIN_GATES: tuple[str, ...] = (
     "fact_checker",
     "citation_checker",
-    "pedagogy_reviewed",
+    "pedagogy_reviewer",
     "consistency_checked",
     "reviewer",
     "latex_writer",
