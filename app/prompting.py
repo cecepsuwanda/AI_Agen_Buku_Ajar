@@ -38,6 +38,7 @@ from domain.checking import CheckVerdict
 from domain.document import OcrPage
 from domain.errors import ConfigError
 from domain.examples import ExampleSet, ExerciseSet
+from domain.latex import LatexChapter
 from domain.ports import RenderedPrompt
 from domain.structured import render_output_contract
 
@@ -56,6 +57,7 @@ OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "exercise.ExerciseSet": ExerciseSet,
     "researcher.ResearchFindings": ResearchFindings,
     "ocr.OcrPage": OcrPage,
+    "latex.LatexChapter": LatexChapter,
     # Satu model untuk keempat pemeriksa §21–§24: vonisnya berbentuk sama, dan
     # bentuk yang sama itu tinggal di satu tempat (lihat ``domain.checking``).
     "checker.CheckVerdict": CheckVerdict,

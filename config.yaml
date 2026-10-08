@@ -49,7 +49,12 @@ pipeline:
   # gate yang urutannya keliru — gate seperti itu akan dilewati `can_advance`
   # tanpa suara. Urutkan mengikuti rantai: contoh → latihan → fakta → sitasi →
   # pedagogi → konsistensi → reviewer → latex → latex_qa.
-  gates: [example_writer, exercise_writer, fact_checker, citation_checker, reviewer]
+  #
+  # `latex_writer` ditempatkan SESUDAH `reviewer` karena rantai §27 memang
+  # begitu: LATEX_GENERATED berada setelah REVIEWED. Ia juga satu-satunya gate
+  # yang menulis berkas, dan ia menulis hanya bila `latex.enabled` — dimatikan,
+  # nama ini tetap di daftar dan gate-nya menjadi pass-through.
+  gates: [example_writer, exercise_writer, fact_checker, citation_checker, reviewer, latex_writer]
 
 # -----------------------------------------------------------------------------
 # RAG (§10, §13). Indeks dibangun perintah tersendiri: `ai-book ingest`.

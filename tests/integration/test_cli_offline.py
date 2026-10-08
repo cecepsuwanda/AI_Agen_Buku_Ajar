@@ -237,6 +237,17 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
     # contoh butuh ketepatan sintaks; peran ``writer`` dipakai Exercise Agent
     # karena latihan adalah prosa. Nomor berkasnyalah yang membuktikan keduanya
     # berada di antara penulis dan peninjau — bukan sebelum, bukan sesudah.
+    #
+    # ``06-reviewer`` lalu ``07-latex``: §25 berada SESUDAH peninjau, sesuai
+    # rantai §27 (LATEX_GENERATED setelah REVIEWED).
+    #
+    # ``08-latex`` dan ``09-latex`` bukan pengulangan yang tidak disengaja.
+    # ``SchemaEchoChatModel`` menyintesis bab dari skema saja — ia tidak melihat
+    # daftar kunci sitasi yang diberikan, jadi ``citations`` yang disintesiskannya
+    # tidak pernah muncul di ``body_tex``, dan tangga perbaikan §25 berjalan
+    # sampai habis. Model sungguhan menerima daftar kunci itu di dalam prompt dan
+    # hampir selalu bersih pada percobaan pertama; yang terlihat di sini adalah
+    # **jalur gagal**, dan justru itu yang layak dibuktikan tanpa jaringan.
     prompts = _dry_run_prompts(layout)
     assert set(prompts) == {
         "01-planner.txt",
@@ -245,6 +256,9 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
         "04-code.txt",
         "05-writer.txt",
         "06-reviewer.txt",
+        "07-latex.txt",
+        "08-latex.txt",
+        "09-latex.txt",
     }
 
     # Setiap prompt memuat system, user, skema format= mentah, dan model+opsi
@@ -445,13 +459,14 @@ def test_dry_run_on_a_planned_book_mirrors_the_plan_read_only(
     # Rencana tidak pernah disusun ulang: ia dibaca dari salinan, bukan dari model.
     # Perencana **buku** karena itu tidak dipanggil — tetapi perincian per bab tetap
     # dikerjakan, sebab ia bekerja pada bab, bukan pada buku (§16), dan tahap
-    # contoh (§19) serta latihan (§20) ikut berjalan karena keduanya bekerja
-    # pada bab juga.
+    # contoh (§19), latihan (§20), serta LaTeX (§25) ikut berjalan karena ketiganya
+    # juga bekerja pada bab.
     assert {_role_of(name) for name in _dry_run_prompts(layout)} == {
         "chapter_planner",
         "code",
         "writer",
         "reviewer",
+        "latex",
     }
     # Tidak ada penumpukan antar-jalankan: sandbox dimulai bersih setiap kali.
     assert set(_dry_run_prompts(layout)) == first_prompts

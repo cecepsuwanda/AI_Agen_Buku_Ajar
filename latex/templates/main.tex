@@ -1,0 +1,49 @@
+% =============================================================================
+% Dokumen utama buku ajar (§25, §42).
+%
+% `main.tex` adalah SATU-SATUNYA berkas LaTeX yang melihat seluruh buku:
+% potongan bab di `chapters/chapterNN.tex` tidak berdiri sendiri (tidak ada
+% \documentclass di dalamnya) dan tidak mungkin dikompilasi terpisah. Itulah
+% sebabnya kompilasi adalah pekerjaan tingkat buku — perintah `export --latex` —
+% dan bukan pekerjaan salah satu gate (§26).
+%
+% Perintah `export --latex` menyalin berkas ini ke `output/latex/` lalu:
+%   * mengganti baris \title dan \author di bawah dengan judul buku yang
+%     sesungguhnya, dan
+%   * mengisi blok \include dengan bab-bab yang sudah mencapai status
+%     LATEX_COMPILED, satu baris per bab, berurutan.
+%
+% Berkas ini dapat ditimpa pengguna lewat `input/source_latex/main.tex`
+% (argumen `--latex-template`, §42): prodi yang punya template sendiri hanya
+% perlu menyediakan berkas dengan nama yang sama.
+% =============================================================================
+
+\documentclass[11pt,a4paper,oneside]{book}
+\input{preamble}
+
+\title{Judul Buku Ajar}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\frontmatter
+\maketitle
+\tableofcontents
+
+\mainmatter
+
+% --- bab-bab: diisi `export --latex`, jangan disunting tangan ---------------
+% \include{chapters/chapter01}
+% \include{chapters/chapter02}
+% ---------------------------------------------------------------------------
+
+\backmatter
+
+% Nama `references` di sini yang menentukan nama berkas daftar pustaka:
+% BibTeX mencarinya sebagai `references.bib`, dan berkas itulah yang ditulis
+% `latex/artifacts.py` (dikunci tes, karena dua tempat ini tidak boleh
+% menyimpang tanpa suara).
+\bibliography{references}
+
+\end{document}

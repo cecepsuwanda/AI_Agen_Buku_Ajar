@@ -142,6 +142,15 @@ def prompt_contexts(
             "research": empty_research,
             "draft_json": '{"title": "Analisis Kompleksitas"}',
         },
+        "latex.chapter": {
+            **common,
+            # Pasangan ``(kunci, sumber)``, bukan daftar nama sumber: template
+            # mengulanginya sebagai dua variabel, dan daftar kunci tertutup itu
+            # memang bentuk yang diterima model (§25).
+            "citations": (("cormen-introduction-3f2a91b4", "Cormen, Algorithms, 4th ed."),),
+            "draft_json": '{"title": "Analisis Kompleksitas"}',
+            "feedback": ("kunci sitasi ditaruh di luar daftar yang diberikan.",),
+        },
         "planner.book": {
             "title": "Algoritma dan Struktur Data",
             "audience": "mahasiswa S1",

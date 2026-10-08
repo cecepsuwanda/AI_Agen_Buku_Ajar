@@ -30,7 +30,7 @@ from typing import Callable
 from domain.chapter import ChapterRecord, ReviewResult
 from domain.enums import ChapterStatus
 from domain.errors import ConfigError, InvalidGateError
-from domain.ports import ModelProvider, PromptLibrary, Reporter, ReviewGate
+from domain.ports import LatexArtifacts, ModelProvider, PromptLibrary, Reporter, ReviewGate
 from domain.rules import validate_gates
 from domain.state import BookState
 
@@ -60,6 +60,19 @@ class GateContext:
 
     #: Batas percobaan perbaikan JSON, dari ``config.yaml``.
     repair_attempts: int = 2
+
+    #: Penulis sumber LaTeX (§25), atau ``None`` bila LaTeX dimatikan.
+    #:
+    #: Satu-satunya dependensi gate yang menyentuh filesystem, dan ia sengaja
+    #: masuk lewat sini alih-alih dirakit di dalam gate: gate tetap bebas dari
+    #: ``open()``, dan yang memutuskan apakah berkas boleh ditulis adalah
+    #: composition root — satu tempat, tempat keputusan yang sama sudah diambil
+    #: untuk RAG (``retriever``) dan model.
+    #:
+    #: ``None`` berarti gate §25 mengembalikan pass-through, bukan bahwa gate-nya
+    #: hilang: bab yang melewati tahap ini tanpa dikerjakan harus terlihat
+    #: melewatinya, sama seperti tahap yang belum berpenghuni.
+    latex: LatexArtifacts | None = None
 
 
 #: Pembuat gate dari konteksnya.
@@ -204,11 +217,11 @@ def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
 #: menolak nama yang sudah terpakai: ia memaksa keputusan sadar, bukan
 #: pembiaran. Yang pertama menjalaninya adalah ``citation_checked``, yang
 #: digantikan ``citation_checker`` pada Tahap 4 (§22); yang kedua
-#: ``fact_checked``, digantikan ``fact_checker`` pada Tahap 5 (§21).
+#: ``fact_checked``, digantikan ``fact_checker`` pada Tahap 5 (§21); yang ketiga
+#: ``latex_generated``, digantikan ``latex_writer`` pada Tahap 6 (§25).
 PLACEHOLDER_GATES: tuple[tuple[str, ChapterStatus], ...] = (
     ("pedagogy_reviewed", ChapterStatus.PEDAGOGY_REVIEWED),
     ("consistency_checked", ChapterStatus.CONSISTENCY_CHECKED),
-    ("latex_generated", ChapterStatus.LATEX_GENERATED),
     ("latex_compiled", ChapterStatus.LATEX_COMPILED),
 )
 

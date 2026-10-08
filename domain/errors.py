@@ -291,3 +291,24 @@ class StateWriteError(InfraError):
             f"Gagal menulis state ke {path}. "
             f"Pastikan tidak ada proses lain yang memegang berkas tersebut."
         )
+
+
+class ArtifactWriteError(InfraError):
+    """Penulisan deliverable (``output/``) gagal (mis. berkas terkunci proses lain).
+
+    Terpisah dari :class:`StateWriteError` meskipun keduanya berarti "gagal
+    menulis berkas", karena akibatnya berbeda jauh dan pesannya harus
+    mengatakannya: state yang gagal ditulis berarti pekerjaan yang hilang,
+    sedangkan deliverable yang gagal ditulis dapat dirender ulang dari state
+    kapan saja. Menyamakan keduanya akan membuat pengguna mengira babnya lenyap
+    padahal hanya berkas turunannya yang belum sempat ditulis.
+    """
+
+    def __init__(self, path: Any, detail: str = "") -> None:
+        self.path = path
+        self.detail = detail
+        tambahan = f": {detail}" if detail else ""
+        super().__init__(
+            f"Gagal menulis berkas keluaran ke {path}{tambahan}. "
+            f"Pastikan tidak ada proses lain yang memegang berkas tersebut."
+        )

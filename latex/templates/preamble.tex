@@ -1,0 +1,61 @@
+% =============================================================================
+% Preamble buku ajar (§25).
+%
+% Berkas ini dimuat `main.tex` SEBELUM seluruh bab. Ia bukan dokumen: tidak ada
+% \documentclass, tidak ada \begin{document}, dan ia tidak boleh di-\include dari
+% potongan bab mana pun.
+%
+% Berkas ini adalah separuh kontrak; separuh lainnya ada di
+% `prompts/latex.chapter.md`. Environment yang ditawarkan kepada model di sana
+% harus ada di sini, karena environment yang tidak didefinisikan baru ketahuan
+% saat kompilasi (§26) — dan pesan galatnya menunjuk ke tempat yang salah, bukan
+% ke baris yang menyebabkannya.
+%
+% Yang harus disunting bersamaan bila salah satu berubah:
+%   * nama daftar pustaka  -> `latex/artifacts.py::BIBLIOGRAPHY_FILENAME`
+%     (dikunci tes; BibTeX mencari `references.bib` dari nama di
+%      \bibliography{references} yang ada di `main.tex`)
+%   * \include bab         -> `domain/latex.py::chapter_latex_filename`
+% =============================================================================
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[indonesian]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
+
+% listing: satu-satunya environment untuk kode program (§19). Warnanya sengaja
+% redup — kode ada di buku untuk dibaca, bukan untuk menarik mata, dan latar
+% kelabu pekat membuatnya sulit dicetak.
+\usepackage{listings}
+\definecolor{codegray}{gray}{0.95}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codegray},
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+}
+
+% definition, example, dan theorem: tiga environment bernama seperti istilah
+% blueprint sendiri (§11, §23). Nomornya mengikuti bab, bukan mengikuti
+% dokumen, supaya "Definisi 3.2" selalu berarti definisi kedua di bab 3 —
+% rujukan silang lintas bab menjadi mungkin dibaca manusia.
+\theoremstyle{definition}
+\newtheorem{definition}{Definisi}[chapter]
+\newtheorem{example}{Contoh}[chapter]
+\newtheorem{theorem}{Teorema}[chapter]
+
+% Daftar pustaka. Gaya `plain` dipilih karena ia ada di setiap distribusi
+% LaTeX; entri `@misc` yang dihasilkan §25 tidak memuat penulis maupun tahun
+% (lihat `domain/latex.py`), dan gaya yang menuntut keduanya akan mencetak
+% tanda tanya di tempat yang seharusnya berisi.
+\bibliographystyle{plain}

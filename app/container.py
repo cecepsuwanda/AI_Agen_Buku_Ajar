@@ -44,6 +44,7 @@ from domain.ports import (
     ChatModel,
     Clock,
     CorpusIndexer,
+    LatexArtifacts,
     ModelProvider,
     PromptLibrary,
     Reporter,
@@ -51,6 +52,7 @@ from domain.ports import (
     Retriever,
     StateStore,
 )
+from latex.artifacts import FileLatexArtifacts
 from memory.artifacts import MarkdownArtifacts
 from memory.project_state import BOOK_FILENAME, JsonStateStore
 from models.dry_run import DryRunChatModel
@@ -384,6 +386,7 @@ def build_director(
     config: AppConfig,
     retriever: Retriever | None = None,
     max_revisions: int | None = None,
+    latex: LatexArtifacts | None = None,
 ) -> BookDirector:
     """Rakit orkestrator beserta seluruh agent dan gate-nya.
 
@@ -399,6 +402,12 @@ def build_director(
         — paket riset terdegradasi yang jujur. Composition root yang memutuskan,
         karena hanya ia yang tahu apakah RAG dinyalakan (§13) dan apakah jalankan
         ini boleh menyentuh jaringan sama sekali.
+    :param latex: ``None`` berarti LaTeX dimatikan, dan gate §25 yang meminta
+        ``pipeline.gates`` berisi ``latex_writer`` tetap dibangun sebagai
+        pass-through. Keputusannya diambil di sini karena hanya composition root
+        yang tahu apakah jalankan ini boleh **menulis berkas** — dan pada
+        ``--dry-run`` jawabannya tidak, sebab jalur keluaran sedang menunjuk ke
+        sandbox sekali pakai.
     """
     repair_attempts = config.retry.repair_attempts
     style_guide = config.book.style_guide
@@ -412,6 +421,7 @@ def build_director(
             min_words=config.book.min_words_per_chapter,
             review_threshold=config.book.review_threshold,
             repair_attempts=repair_attempts,
+            latex=latex,
         ),
     )
 
@@ -557,6 +567,16 @@ def build_container(
     if store is not None and config.rag.enabled:
         retriever = VectorRetriever(store, default_limit=config.rag.top_k)
 
+    # Penulis sumber LaTeX (§25) hanya dirakit bila LaTeX dinyalakan. Bukan
+    # karena menulis berkas itu mahal, melainkan karena "jangan menulis apa pun
+    # saat dimatikan" adalah janji konfigurasinya sendiri — dan janji itu hanya
+    # dapat ditepati di tempat yang tahu apakah konfigurasinya berbunyi begitu.
+    # Pada ``--dry-run`` jalur keluaran sudah menunjuk ke sandbox, sehingga
+    # cabang ini tidak perlu tahu tentang dry-run sama sekali.
+    latex: LatexArtifacts | None = (
+        FileLatexArtifacts(paths.latex_dir) if config.latex.enabled else None
+    )
+
     return Container(
         config=config,
         paths=paths,
@@ -577,6 +597,7 @@ def build_container(
             config=config,
             retriever=retriever,
             max_revisions=max_revisions,
+            latex=latex,
         ),
         indexer=store,
     )

@@ -219,6 +219,44 @@ class ChapterArtifacts(Protocol):
         ...
 
 
+@runtime_checkable
+class LatexArtifacts(Protocol):
+    """Penulisan sumber LaTeX ke ``output/latex/`` (§25, §39).
+
+    Terpisah dari :class:`ChapterArtifacts` meskipun keduanya menulis turunan
+    dari record yang sama, karena keduanya **dapat dimatikan secara terpisah**:
+    buku tanpa LaTeX tetap buku yang lengkap (Markdown-nya ada), sedangkan buku
+    tanpa Markdown bukan apa-apa. Menyatukannya berarti setiap pembaca Markdown
+    ikut menanggung direktori LaTeX yang mungkin tidak ada.
+
+    Port ini **tidak** memuat langkah kompilasi. Bab yang ditulis di sini adalah
+    potongan ``\\include`` — ia tidak berdiri sendiri, sehingga mengompilasinya
+    per bab tidak mungkin, dan kompilasi sungguhannya adalah pekerjaan
+    **tingkat buku** yang dijalankan perintah ``export`` beserta pemeriksaannya
+    di §26 (Tahap 7). Port yang menyediakan ``compile()`` tanpa satu pun
+    pemanggil produksi hanya akan menjadi kode mati yang harus diuji.
+
+    Karena itu gate §25 adalah satu-satunya gate yang **menulis berkas**, dan itu
+    disengaja: menulis ``.tex`` adalah pekerjaan batas sistem, dan alternatifnya
+    — menyunting ``BookDirector`` agar mengenal artefak LaTeX — akan merusak sifat
+    OCP yang justru menjadi alasan registri gate ada.
+    """
+
+    def save_chapter(self, number: int, text: str) -> str:
+        """Tulis potongan LaTeX satu bab. Kembalikan jalurnya."""
+        ...
+
+    def save_bibliography(self, text: str) -> str:
+        """Tulis daftar pustaka (``references.bib``). Kembalikan jalurnya.
+
+        Ditulis oleh gate yang sama dengan babnya, bukan oleh ``export``: entri
+        daftar pustaka hanya bertambah, dan bab pertama yang sudah menulisnya
+        membuat setiap bab berikutnya tidak perlu menunggu perintah terakhir
+        untuk dapat dikompilasi.
+        """
+        ...
+
+
 # ---------------------------------------------------------------------------
 # Keluaran / pelaporan
 # ---------------------------------------------------------------------------
