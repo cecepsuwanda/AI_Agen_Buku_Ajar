@@ -177,9 +177,10 @@ class PassThroughGate:
 def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
     """Bangun factory pass-through untuk satu status.
 
-    Ditulis sebagai fungsi penghasil, bukan satu kelas per tahap: enam kelas
+    Ditulis sebagai fungsi penghasil, bukan satu kelas per tahap: kelas-kelas
     yang isinya identik hanya akan menyembunyikan bahwa semuanya memang
-    placeholder.
+    placeholder — dan jumlahnya berkurang setiap tahap, sehingga angka yang
+    ditulis di sini akan basi lebih cepat daripada isinya.
     """
 
     def factory(context: GateContext) -> ReviewGate:
@@ -195,16 +196,16 @@ def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
 #: mengaktifkannya nanti benar-benar hanya satu baris konfigurasi:
 #:
 #:     pipeline:
-#:       gates: [fact_checked, pedagogy_reviewed, reviewer]
+#:       gates: [pedagogy_reviewed, reviewer]
 #:
 #: Ketika agent sungguhnya tiba, ia mendaftar dengan namanya sendiri dan **baris
 #: di bawah dihapus** — bukan ditimpa. Penghapusan itu bagian dari pekerjaan
 #: tahapnya, bukan akibat sampingnya, dan itulah gunanya ``register_gate``
 #: menolak nama yang sudah terpakai: ia memaksa keputusan sadar, bukan
 #: pembiaran. Yang pertama menjalaninya adalah ``citation_checked``, yang
-#: digantikan ``citation_checker`` pada Tahap 4 (§22).
+#: digantikan ``citation_checker`` pada Tahap 4 (§22); yang kedua
+#: ``fact_checked``, digantikan ``fact_checker`` pada Tahap 5 (§21).
 PLACEHOLDER_GATES: tuple[tuple[str, ChapterStatus], ...] = (
-    ("fact_checked", ChapterStatus.FACT_CHECKED),
     ("pedagogy_reviewed", ChapterStatus.PEDAGOGY_REVIEWED),
     ("consistency_checked", ChapterStatus.CONSISTENCY_CHECKED),
     ("latex_generated", ChapterStatus.LATEX_GENERATED),

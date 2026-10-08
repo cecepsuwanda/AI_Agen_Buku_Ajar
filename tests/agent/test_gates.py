@@ -102,7 +102,7 @@ def test_registering_an_existing_name_is_refused() -> None:
 # ---------------------------------------------------------------------------
 def test_build_gates_preserves_the_configured_order(context: GateContext) -> None:
     """Urutan di ``pipeline.gates`` adalah urutan tahap — bukan detail kosmetik."""
-    names = ("fact_checked", "reviewer", "consistency_checked")
+    names = ("fact_checker", "reviewer", "consistency_checked")
 
     gates = build_gates(names, context)
 
@@ -144,7 +144,7 @@ def test_pass_through_gate_marks_itself_as_skipped(book: BookState) -> None:
     Bab yang lolos tanpa pemeriksaan harus terlihat sebagai bab yang lolos tanpa
     pemeriksaan — itulah bedanya melaporkan dan menyembunyikan.
     """
-    gate = PassThroughGate(name="fact_checked", produces=ChapterStatus.FACT_CHECKED)
+    gate = PassThroughGate(name="latex_generated", produces=ChapterStatus.LATEX_GENERATED)
 
     result = gate.evaluate(ChapterRecord(number=1), book)
 
@@ -171,11 +171,12 @@ def test_placeholder_gate_produces_the_status_it_stands_for(context: GateContext
 #: Daftarnya sengaja literal, seperti ``EXPECTED_PROMPTS`` di
 #: ``tests/unit/test_prompting.py``: setiap kali sebuah placeholder digantikan
 #: agent sungguhan (Tahap 4 menggantikan ``citation_checked`` dengan
-#: ``citation_checker``), daftar ini harus disunting — dan suntingan itu adalah
+#: ``citation_checker``, Tahap 5 menggantikan ``fact_checked`` dengan
+#: ``fact_checker``), daftar ini harus disunting — dan suntingan itu adalah
 #: keputusan sadar, bukan pembiaran. Menurunkannya dari ``PLACEHOLDER_GATES``
 #: justru akan menyembunyikan pergantian itu.
 CHAIN_GATES: tuple[str, ...] = (
-    "fact_checked",
+    "fact_checker",
     "citation_checker",
     "pedagogy_reviewed",
     "consistency_checked",

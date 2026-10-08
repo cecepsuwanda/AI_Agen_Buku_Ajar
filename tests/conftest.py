@@ -135,6 +135,13 @@ def prompt_contexts(
             "research": empty_research,
             "feedback": ("2 latihan tidak menyebut satu pun tujuan bab.",),
         },
+        "factcheck.chapter": {
+            **common,
+            "claims": ("Pencarian biner memeriksa paling banyak 20 elemen.",),
+            "evidence": _fixture_evidence(),
+            "research": empty_research,
+            "draft_json": '{"title": "Analisis Kompleksitas"}',
+        },
         "planner.book": {
             "title": "Algoritma dan Struktur Data",
             "audience": "mahasiswa S1",

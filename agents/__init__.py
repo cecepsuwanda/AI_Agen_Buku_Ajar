@@ -15,6 +15,7 @@ from agents.chapter_planner import ChapterPlannerAgent
 from agents.citation_checker import CitationChecker, CitationCheckerAgent
 from agents.example_writer import ExampleWriterAgent, ExampleWriterGate
 from agents.exercise_writer import ExerciseWriterAgent, ExerciseWriterGate
+from agents.fact_checker import FactChecker, FactCheckerAgent
 from agents.gates import PassThroughGate, build_gates, register_gate, registered_gate_names
 from agents.planner import BookPlanner
 from agents.researcher import NullResearcher, RagResearcher
@@ -35,6 +36,8 @@ __all__ = [
     "ExampleWriterGate",
     "ExerciseWriterAgent",
     "ExerciseWriterGate",
+    "FactChecker",
+    "FactCheckerAgent",
     "NullResearcher",
     "PassThroughGate",
     "RagResearcher",

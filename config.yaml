@@ -49,7 +49,7 @@ pipeline:
   # gate yang urutannya keliru — gate seperti itu akan dilewati `can_advance`
   # tanpa suara. Urutkan mengikuti rantai: contoh → latihan → fakta → sitasi →
   # pedagogi → konsistensi → reviewer → latex → latex_qa.
-  gates: [example_writer, exercise_writer, citation_checker, reviewer]
+  gates: [example_writer, exercise_writer, fact_checker, citation_checker, reviewer]
 
 # -----------------------------------------------------------------------------
 # RAG (§10, §13). Indeks dibangun perintah tersendiri: `ai-book ingest`.
@@ -102,6 +102,10 @@ profiles:
     researcher:      {model: "gpt-oss:120b-cloud",        temperature: 0.1, max_tokens: 4096}
     writer:          {model: "gemma4:31b-cloud",          temperature: 0.7, max_tokens: 8192, num_ctx: 131072}
     reviewer:        {model: "gpt-oss:120b-cloud",        temperature: 0.1, max_tokens: 4096}
+    # Peran tersendiri di §6, tetapi jenis pekerjaannya sama dengan `reviewer`:
+    # menilai pekerjaan yang sudah ada. Dijawab model yang sama supaya tidak ada
+    # model ketiga yang harus diunduh hanya untuk satu gate.
+    fact_checker:    {model: "gpt-oss:120b-cloud",        temperature: 0.1, max_tokens: 4096}
     code:            {model: "gpt-oss:120b-cloud",        temperature: 0.2, max_tokens: 4096}
     latex:           {model: "gpt-oss:120b-cloud",        temperature: 0.1, max_tokens: 8192}
     vision:          {model: "gemma3:4b",                 temperature: 0.2}
@@ -123,6 +127,7 @@ profiles:
     researcher:      {model: "gemma3:4b", temperature: 0.1, max_tokens: 1536, num_ctx: 32768}
     writer:          {model: "gemma3:4b", temperature: 0.7, max_tokens: 6144, num_ctx: 32768}
     reviewer:        {model: "gemma3:4b", temperature: 0.1, max_tokens: 2048, num_ctx: 32768}
+    fact_checker:    {model: "gemma3:4b", temperature: 0.1, max_tokens: 2048, num_ctx: 32768}
     code:            {model: "gemma3:4b", temperature: 0.2, max_tokens: 2048, num_ctx: 32768}
     latex:           {model: "gemma3:4b", temperature: 0.1, max_tokens: 2048, num_ctx: 32768}
     vision:          {model: "gemma3:4b", temperature: 0.2}

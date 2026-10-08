@@ -61,12 +61,17 @@ def finding(subject: str, ok: bool, detail: str = "") -> CheckJudgement:
 # ---------------------------------------------------------------------------
 # Yang diminta dari model — dan yang sengaja tidak
 # ---------------------------------------------------------------------------
-def test_the_model_is_never_asked_for_a_source_or_a_page() -> None:
+def test_the_model_is_never_asked_for_a_page_but_may_name_the_source() -> None:
     """``strict_schema`` mewajibkan semua properti; yang tidak ditanyakan tidak dikarang.
 
     Model tidak pernah melihat halaman yang tepat. Memaksa field itu ada di skema
     berarti mengundang nomor halaman karangan — dan halaman yang salah adalah
     kesalahan yang tidak akan pernah ditemukan pembaca.
+
+    ``source`` berbeda, dan karena itu ia boleh ada: nama sumber **tertulis di
+    dalam prompt**, sehingga model menyalinnya, bukan mengarangnya. Tanpa salinan
+    itu, pemeriksa fakta — yang subjeknya berupa klaim, bukan nama sumber — tidak
+    punya jalan apa pun untuk menunjuk bahan yang dibandingkannya.
     """
     assert set(strict_schema(CheckVerdict)["properties"]) == {
         "approved",
@@ -74,7 +79,12 @@ def test_the_model_is_never_asked_for_a_source_or_a_page() -> None:
         "feedback",
         "findings",
     }
-    assert set(strict_schema(CheckJudgement)["properties"]) == {"subject", "ok", "detail"}
+    assert set(strict_schema(CheckJudgement)["properties"]) == {
+        "subject",
+        "ok",
+        "detail",
+        "source",
+    }
 
 
 def test_the_model_is_not_asked_for_the_gate_name_or_the_skipped_flag() -> None:
@@ -142,6 +152,50 @@ def test_a_finding_without_matching_evidence_keeps_the_subject_but_no_source() -
     assert completed.page is None
 
 
+def test_a_claim_finding_is_matched_through_the_source_the_model_named() -> None:
+    """Pemeriksa fakta menilai *klaim*; tanpa ``source`` klaim itu tidak menunjuk halaman mana pun.
+
+    Subjeknya bukan nama sumber — ia kalimat dari draf — sehingga pencocokan
+    langsung tidak akan pernah berhasil. Yang membuat halamannya terisi adalah
+    nama sumber yang disalin model dari daftar bahan yang dibacanya.
+
+    Perhatikan bahwa ``page`` tetap diisi **program**: model hanya menyalin nama
+    sumbernya, sedangkan nomor halamannya diambil dari bukti yang benar-benar
+    dimiliki sistem.
+    """
+    named = CheckFinding.of(
+        CheckJudgement(
+            subject="O(n) berarti waktu eksekusi tumbuh linear.",
+            ok=False,
+            detail="Bahan menyebut linear, klaim menyebut kuadratik.",
+            source=CORMEN,
+        ),
+        evidence=EVIDENCE,
+    )
+
+    assert named.source == CORMEN
+    assert named.page == 45, "halaman diisi program dari bukti, bukan oleh model"
+
+
+def test_a_source_the_model_invented_matches_nothing() -> None:
+    """Sumber yang tidak ada di daftar bahan bukan sumber: ia tidak menunjuk apa pun."""
+    completed = CheckFinding.of(
+        CheckJudgement(subject="Suatu klaim.", ok=False, source="Knuth, TAOCP, 3rd ed."),
+        evidence=EVIDENCE,
+    )
+
+    assert completed.source == ""
+    assert completed.page is None
+
+
+def test_the_subject_is_still_the_fallback_when_the_model_names_no_source() -> None:
+    """Pemeriksa sitasi sudah menaruh nama sumber di ``subject`` — jalur itu utuh."""
+    completed = CheckFinding.of(finding(CORMEN, ok=False), evidence=EVIDENCE)
+
+    assert completed.source == CORMEN
+    assert completed.page == 45
+
+
 # ---------------------------------------------------------------------------
 # describe — satu baris yang dapat dikerjakan penulis
 # ---------------------------------------------------------------------------
@@ -174,6 +228,21 @@ def test_describe_without_a_source_is_just_the_subject_and_the_reason() -> None:
     assert completed.describe() == "Klaim tanpa bukti: tidak memenuhi syarat"
 
 
+def test_describe_marks_a_finding_the_chapter_itself_already_declared() -> None:
+    """Temuan yang sudah dinyatakan penulis tetap dilaporkan — tetapi terlihat berbeda.
+
+    Pembaca laporan berhak tahu bahwa penulisnya memang sudah jujur tentang
+    klaim ini. Yang tidak boleh adalah memperlakukannya sama dengan klaim yang
+    disembunyikan; pada gilirannya, yang tidak boleh lagi adalah menghapusnya
+    dari laporan hanya karena ia tidak dihukum.
+    """
+    completed = CheckFinding(subject="Pencarian biner O(log n).", ok=False, declared=True)
+
+    assert completed.describe() == (
+        "Pencarian biner O(log n).: tidak memenuhi syarat (sudah dinyatakan bab ini)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # GateReport — vonis ditegakkan terhadap temuannya sendiri
 # ---------------------------------------------------------------------------
@@ -190,7 +259,7 @@ def test_failed_returns_only_the_findings_that_are_not_ok() -> None:
     assert tuple(item.subject for item in report.failed()) == ("b", "c")
 
 
-def test_a_report_that_approves_its_own_failing_finding_is_turned_down() -> None:
+def test_a_report_throws_down_a_verdict_that_contradicts_its_own_findings() -> None:
     """Persetujuan model yang bertentangan dengan temuannya sendiri tidak menolong bab ini."""
     report = GateReport(
         approved=True,
@@ -203,6 +272,7 @@ def test_a_report_that_approves_its_own_failing_finding_is_turned_down() -> None
     assert enforced.approved is False
     assert enforced.score == 9, "angkanya tidak diubah; yang diturunkan adalah vonisnya"
     assert any("diabaikan oleh sistem" in note for note in enforced.feedback)
+    assert any("tidak dinyatakan bab ini" in note for note in enforced.feedback)
 
 
 def test_a_report_with_no_failing_finding_is_left_alone() -> None:
@@ -221,6 +291,63 @@ def test_a_report_that_already_rejects_is_not_annotated_twice() -> None:
     report = GateReport(approved=False, findings=(CheckFinding(subject="X", ok=False),))
 
     assert report.enforce_findings().feedback == ()
+
+
+# ---------------------------------------------------------------------------
+# silent_failures — bab yang jujur bukan bab yang gagal
+# ---------------------------------------------------------------------------
+def test_a_finding_the_chapter_already_declared_is_not_a_silent_failure() -> None:
+    """Kesalahan yang diakui berbeda dari kesalahan yang disembunyikan.
+
+    Penulis **diwajibkan** mencatat klaim yang tidak dapat didukungnya (§34,
+    ``writer.chapter.md``). Menghukum catatan itu akan membuatnya menyembunyikan
+    klaim alih-alih menandainya — persis kebalikan dari yang diminta.
+    """
+    report = GateReport(
+        approved=True,
+        score=8,
+        findings=(
+            CheckFinding(subject="a", ok=False, declared=True),
+            CheckFinding(subject="b", ok=False),
+            CheckFinding(subject="c", ok=True),
+        ),
+    )
+
+    assert tuple(item.subject for item in report.failed()) == ("a", "b")
+    assert tuple(item.subject for item in report.silent_failures()) == ("b",)
+
+
+def test_a_report_whose_only_failures_were_declared_keeps_its_approval() -> None:
+    report = GateReport(
+        approved=True,
+        score=8,
+        findings=(CheckFinding(subject="a", ok=False, declared=True),),
+    )
+
+    enforced = report.enforce_findings()
+
+    assert enforced.approved is True
+    assert enforced.feedback == ()
+
+
+def test_a_declared_failure_still_loses_to_the_score_threshold() -> None:
+    """Tidak dihukum oleh temuannya bukan berarti bebas dari ambangnya.
+
+    Klaim yang dinyatakan tidak membatalkan persetujuan, tetapi bab yang
+    klaimnya sebagian besar tidak didukung tetap tidak layak lulus — dan yang
+    memutuskan itu tetap :func:`~domain.rules.decide_review`, bukan gate ini.
+    """
+    report = GateReport(
+        approved=True,
+        score=4,
+        findings=(CheckFinding(subject="a", ok=False, declared=True),),
+    )
+
+    result = decide_review(report.enforce_findings().verdict(), gate="fact_checker", threshold=7)
+
+    assert result.approved is False
+    assert result.score == 4
+    assert any("ambang" in note for note in result.feedback)
 
 
 # ---------------------------------------------------------------------------
