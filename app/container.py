@@ -31,6 +31,7 @@ from agents import (
     ChapterWriter,
     DirectorSettings,
     NullResearcher,
+    RagResearcher,
     build_gates,
 )
 from agents.gates import GateContext
@@ -42,9 +43,12 @@ from domain.ports import (
     ChapterArtifacts,
     ChatModel,
     Clock,
+    CorpusIndexer,
     ModelProvider,
     PromptLibrary,
     Reporter,
+    Researcher,
+    Retriever,
     StateStore,
 )
 from memory.artifacts import MarkdownArtifacts
@@ -53,6 +57,9 @@ from models.dry_run import DryRunChatModel
 from models.model_registry import ModelRegistry
 from models.model_router import ModelRouter
 from models.ollama_client import ChatModelFactory, build_retry
+from rag.embeddings import BatchingEmbedder
+from rag.retriever import VectorRetriever
+from rag.vector_store import ChromaVectorStore
 
 #: Nama direktori sandbox ``--dry-run`` di dalam ``state/`` (§28).
 SANDBOX_DIRNAME = "dryrun"
@@ -279,6 +286,13 @@ class Container:
     state_store: StateStore
     artifacts: ChapterArtifacts
     director: BookDirector
+    #: Indeks vektor (§13), atau ``None`` pada ``--dry-run``.
+    #:
+    #: Ada di container — bukan dibangun ulang oleh perintah ``ingest`` — karena
+    #: dua ``PersistentClient`` pada direktori yang sama dalam satu proses saling
+    #: mengunci berkasnya di Windows. Satu indeks per proses, dan inilah
+    #: tempatnya.
+    indexer: CorpusIndexer | None = None
 
     def override(self, **changes: Any) -> "Container":
         """Salinan container dengan beberapa bagian ditukar.
@@ -316,6 +330,50 @@ def build_registry(
     )
 
 
+def build_vector_store(paths: ProjectPaths, router: ModelProvider) -> ChromaVectorStore:
+    """Rakit indeks vektor lokal (§13).
+
+    Menerima **port** ``ModelProvider``, bukan registry: yang dibutuhkan hanyalah
+    model embedding peran ``embedding``, dan menyebut perannya secara eksplisit di
+    sini membuat penggantinya cukup dilakukan di ``config.yaml``.
+
+    Tidak ada satu pun angka konfigurasi yang dibutuhkan di sini — ukuran batch
+    embedding punya bawaannya sendiri dan nama koleksinya tetap. Karena itu
+    parameter ``config`` tidak diambil: tanda tangan yang menerima sesuatu yang
+    tidak dipakai akan membuat pembacanya mengira ada perilaku yang diatur dari
+    sana.
+    """
+    return ChromaVectorStore(
+        paths.vector_store_dir,
+        embedder=BatchingEmbedder(router.embedder("embedding")),
+    )
+
+
+def _build_researcher(
+    *,
+    retriever: Retriever | None,
+    router: ModelProvider,
+    prompts: PromptLibrary,
+    repair_attempts: int,
+    top_k: int,
+) -> Researcher:
+    """Pilih researcher sesuai ketersediaan retriever (§17).
+
+    Satu tempat, bukan percabangan yang tersebar: ``ChapterWriter`` tidak pernah
+    tahu researcher mana yang dipakai, dan menambahkan researcher ketiga kelak
+    cukup mengubah fungsi ini.
+    """
+    if retriever is None:
+        return NullResearcher()
+    return RagResearcher(
+        model=router.chat("researcher"),
+        prompts=prompts,
+        retriever=retriever,
+        top_k=top_k,
+        max_repair_attempts=repair_attempts,
+    )
+
+
 def build_director(
     *,
     router: ModelProvider,
@@ -324,6 +382,7 @@ def build_director(
     state: StateStore,
     artifacts: ChapterArtifacts,
     config: AppConfig,
+    retriever: Retriever | None = None,
     max_revisions: int | None = None,
 ) -> BookDirector:
     """Rakit orkestrator beserta seluruh agent dan gate-nya.
@@ -335,6 +394,11 @@ def build_director(
     Perhatikan apa yang **tidak** ada di sini: tidak satu pun nama model. Setiap
     agent menerima ``router.chat("<peran>")``, dan peran mana memakai model mana
     ditentukan sepenuhnya oleh ``config.yaml`` (§6, §7).
+
+    :param retriever: ``None`` berarti :class:`~agents.researcher.NullResearcher`
+        — paket riset terdegradasi yang jujur. Composition root yang memutuskan,
+        karena hanya ia yang tahu apakah RAG dinyalakan (§13) dan apakah jalankan
+        ini boleh menyentuh jaringan sama sekali.
     """
     repair_attempts = config.retry.repair_attempts
     style_guide = config.book.style_guide
@@ -367,7 +431,13 @@ def build_director(
             prompts=prompts,
             max_repair_attempts=repair_attempts,
         ),
-        researcher=NullResearcher(),
+        researcher=_build_researcher(
+            retriever=retriever,
+            router=router,
+            prompts=prompts,
+            repair_attempts=repair_attempts,
+            top_k=config.rag.top_k,
+        ),
         gates=gates,
         state=state,
         artifacts=artifacts,
@@ -478,6 +548,15 @@ def build_container(
     )
     artifacts = MarkdownArtifacts(paths.output)
 
+    # Indeks vektor tidak dibangun pada ``--dry-run``. Bukan karena mahal,
+    # melainkan karena ``--dry-run`` menjanjikan **nol jaringan**, dan pencarian
+    # di indeks menuntut embedding pertanyaan — yaitu panggilan HTTP. Jalur itu
+    # juga akan menyentuh berkas indeks yang bukan milik sandbox.
+    store = None if dry_run else build_vector_store(paths, router)
+    retriever: Retriever | None = None
+    if store is not None and config.rag.enabled:
+        retriever = VectorRetriever(store, default_limit=config.rag.top_k)
+
     return Container(
         config=config,
         paths=paths,
@@ -496,8 +575,10 @@ def build_container(
             state=state_store,
             artifacts=artifacts,
             config=config,
+            retriever=retriever,
             max_revisions=max_revisions,
         ),
+        indexer=store,
     )
 
 
@@ -517,4 +598,5 @@ __all__ = [
     "build_director",
     "build_registry",
     "build_retry_policy",
+    "build_vector_store",
 ]

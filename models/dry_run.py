@@ -173,6 +173,7 @@ class DryRunChatModel:
             f"# opsi    : {describe_options(dict(options))}",
             f"# prompt  : versi {request.prompt_version}",
             f"# think   : {request.think}",
+            f"# gambar  : {len(request.images)} (tidak ditulis ke berkas)",
             "# Tidak ada permintaan jaringan yang dikirim.",
             "",
             "=" * 72,

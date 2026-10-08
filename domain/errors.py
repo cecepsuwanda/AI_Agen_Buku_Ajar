@@ -248,6 +248,28 @@ class TruncatedOutputError(InfraError):
         )
 
 
+class EmbeddingShapeError(InfraError):
+    """Model embedding mengembalikan jumlah vektor yang salah.
+
+    Bukan kesalahan yang dapat dibiarkan: vektor dikaitkan ke potongan
+    berdasarkan urutan, sehingga satu vektor yang hilang menggeser **seluruh**
+    kaitan setelahnya. Tidak ada galat yang muncul setelahnya — yang muncul
+    adalah indeks yang menunjuk halaman yang salah, dan itu jauh lebih mahal
+    daripada berhenti di sini.
+    """
+
+    def __init__(self, *, expected: int, produced: int, offset: int = 0) -> None:
+        self.expected = expected
+        self.produced = produced
+        self.offset = offset
+        where = f"batch mulai teks ke-{offset}" if offset else "batch pertama"
+        super().__init__(
+            f"Model embedding mengembalikan {produced} vektor untuk {expected} teks "
+            f"({where}). Urutan vektor menentukan potongan mana yang diwakilinya — "
+            f"indeks tidak dibangun dari hasil yang tidak sepanjang masukannya."
+        )
+
+
 class StateCorruptError(InfraError):
     """Berkas state tidak dapat dibaca. State TIDAK pernah dihapus otomatis."""
 

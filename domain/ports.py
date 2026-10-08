@@ -13,12 +13,13 @@ ditegakkan oleh tipe, bukan oleh konvensi.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Iterable, Mapping, Protocol, Sequence, runtime_checkable
 
 from pydantic import BaseModel
 
 from domain.book import ChapterSpec
-from domain.chapter import ChapterRecord, ResearchPackage, ReviewResult
+from domain.chapter import ChapterRecord, Evidence, ResearchPackage, ReviewResult
+from domain.document import Document
 from domain.enums import ChapterStatus
 from domain.state import BookState
 
@@ -41,6 +42,12 @@ class ChatRequest:
     model: str
     system: str
     user: str
+    #: Gambar yang menyertai pesan pengguna — halaman PDF hasil scan untuk model
+    #: ``vision`` (§10). ``bytes``, bukan jalur berkas: adapter PDF yang merender
+    #: halamannya, dan port ini tidak boleh tahu bahwa gambar berasal dari PDF,
+    #: apalagi dari pustaka mana. Yang menerjemahkan ``bytes`` menjadi base64
+    #: adalah adapter HTTP, sesuai kontrak SDK-nya.
+    images: tuple[bytes, ...] = ()
     format_schema: Mapping[str, Any] | None = None
     temperature: float | None = None
     max_tokens: int | None = None
@@ -261,10 +268,52 @@ class ReviewGate(Protocol):
 class Researcher(Protocol):
     """Port Research Agent (§17).
 
-    MVP memakai :class:`agents.researcher.NullResearcher`; Tahap 3 menggantinya
-    dengan researcher berbasis RAG **tanpa mengubah** ``ChapterWriter``.
+    MVP memakai :class:`agents.researcher.NullResearcher`; researcher berbasis
+    RAG menyusul **tanpa mengubah** ``ChapterWriter``.
     """
 
     def collect(self, spec: ChapterSpec, book: BookState) -> ResearchPackage:
         """Kumpulkan paket riset untuk satu bab."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# RAG (§§10, §11, §13)
+# ---------------------------------------------------------------------------
+class CorpusIndexer(Protocol):
+    """Port pembangunan indeks bahan (§10, §13).
+
+    Terpisah dari :class:`Retriever` dan bukan satu port dengan dua method:
+    yang satu **menulis** indeks dari ``input/references/`` pada perintah
+    ``ingest``, yang lain **membacanya** pada setiap bab yang ditulis. Menyatukan
+    keduanya berarti setiap penulis bab memegang kemampuan untuk membuang indeks
+    yang dibangun orang lain — dan itu bukan kemampuan yang perlu dimiliki siapa
+    pun kecuali perintah ``ingest``.
+    """
+
+    def index(self, documents: Iterable[Document]) -> int:
+        """Tanam ``documents`` ke indeks. Kembalikan jumlah potongan tertanam."""
+        ...
+
+    def reset(self) -> None:
+        """Kosongkan indeks.
+
+        Bukan kemewahan: ``ingest`` harus dapat diulang setelah bahan rujukan
+        diganti, dan indeks yang menumpuk bahan lama akan mengutip halaman dari
+        berkas yang sudah tidak ada di ``input/``.
+        """
+        ...
+
+
+class Retriever(Protocol):
+    """Port pencarian bukti (§13).
+
+    Mengembalikan :class:`~domain.chapter.Evidence` — **bukan** ``str``. §13
+    melarang menyerahkan hanya ``text`` kepada penulis karena informasi sumber
+    akan hilang bersamanya; menegakkan larangan itu pada tingkat tipe berarti
+    penulis tidak punya rute untuk menerima teks tanpa asalnya.
+    """
+
+    def retrieve(self, query: str, *, limit: int = 8) -> tuple[Evidence, ...]:
+        """Cari bukti yang relevan dengan ``query``, terbaik lebih dulu."""
         ...

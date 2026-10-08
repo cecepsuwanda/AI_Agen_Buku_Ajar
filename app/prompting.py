@@ -33,7 +33,8 @@ from jinja2 import Environment, StrictUndefined, TemplateError
 from pydantic import BaseModel
 
 from domain.book import BookSpec, ChapterSpec
-from domain.chapter import ChapterDraft, ReviewVerdict
+from domain.chapter import ChapterDraft, ResearchFindings, ReviewVerdict
+from domain.document import OcrPage
 from domain.errors import ConfigError
 from domain.examples import ExampleSet, ExerciseSet
 from domain.ports import RenderedPrompt
@@ -52,6 +53,8 @@ OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "reviewer.ReviewVerdict": ReviewVerdict,
     "example.ExampleSet": ExampleSet,
     "exercise.ExerciseSet": ExerciseSet,
+    "researcher.ResearchFindings": ResearchFindings,
+    "ocr.OcrPage": OcrPage,
 }
 
 #: Kunci front-matter yang wajib ada di setiap berkas prompt.

@@ -19,7 +19,10 @@ model LLM, tidak ada berkas, dan tidak ada yang diubah.
 
 from __future__ import annotations
 
+from typing import Sequence
+
 from domain.book import BookSpec
+from domain.chapter import Evidence
 from domain.state import BookState
 
 
@@ -61,4 +64,33 @@ def terminology_lines(book: BookState) -> tuple[str, ...]:
     return tuple(f"{term}: {book.terminology[term]}" for term in sorted(book.terminology))
 
 
-__all__ = ["book_language", "book_title", "summaries_before", "terminology_lines"]
+def evidence_lines(evidence: Sequence[Evidence]) -> tuple[str, ...]:
+    """Bukti retriever sebagai teks prompt, bernomor dan bersumber (MURNI).
+
+    Nomor urutnya ada supaya peneliti dapat menyebut "bukti 3" alih-alih
+    menyalin ulang kalimatnya — dan supaya manusia yang membaca temuan dapat
+    kembali ke potongan yang dimaksud.
+
+    Yang **selalu** ikut serta adalah ``source`` dan halaman. Menyusun daftar
+    bukti tanpa keduanya akan menghasilkan bahan yang tampak sama tetapi tidak
+    dapat diperiksa: model menyaringnya dengan baik, dan tidak ada satu pun cara
+    untuk tahu dari halaman mana kalimat itu berasal.
+    """
+    lines: list[str] = []
+    for index, item in enumerate(evidence, start=1):
+        kepala = [item.source]
+        if item.section.strip():
+            kepala.append(item.section.strip())
+        if item.page is not None:
+            kepala.append(f"hlm. {item.page}")
+        lines.append(f"[{index}] " + " — ".join(kepala) + "\n" + item.text.strip())
+    return tuple(lines)
+
+
+__all__ = [
+    "book_language",
+    "book_title",
+    "evidence_lines",
+    "summaries_before",
+    "terminology_lines",
+]

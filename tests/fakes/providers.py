@@ -10,9 +10,11 @@ Dua janji yang dipegang kelas ini:
 1. **Satu instance per peran, selamanya.** ``chat("writer")`` berkali-kali
    mengembalikan objek yang sama, sehingga penghitung panggilan dan antrean
    balasannya bermakna.
-2. **``embedder`` melempar.** MVP ini tidak punya embedding sama sekali, dan
-   permintaan embedding dari jalur kode mana pun adalah regresi yang harus
-   terlihat keras — bukan ``NotImplementedError`` yang tertelan (ISP).
+2. **``embedder`` melempar.** Provider palsu ini sengaja tidak menyediakan model
+   embedding: tes pipeline tidak menempuh jalur retrieval, dan permintaan
+   embedding dari jalur kode mana pun adalah regresi yang harus terlihat keras
+   — bukan ``NotImplementedError`` yang tertelan (ISP). Tes yang memang menguji
+   retrieval menyuntikkan embedder-nya sendiri (``tests/fakes/embeddings.py``).
 """
 
 from __future__ import annotations
@@ -45,9 +47,15 @@ class StaticModelProvider:
         return self._by_role.get(role, self._default)
 
     def embedder(self, role: str = "embedding") -> Any:
-        """Selalu melempar: MVP ini tidak punya jalur embedding."""
+        """Selalu melempar: model embedding tidak disediakan untuk tes pipeline.
+
+        Jalur embedding sudah ada di ``rag/``; yang tidak ada di sini adalah
+        modelnya. Karena itu pesannya menyebut apa yang harus dilakukan
+        pemanggilnya, bukan sekadar bahwa ada yang salah.
+        """
         raise AssertionError(
-            f"Pipeline MVP tidak boleh meminta model embedding (peran {role!r})."
+            f"Tes ini tidak menyediakan model embedding, tetapi pipeline memintanya "
+            f"(peran {role!r}). Suntikkan embedder lewat Container bila memang disengaja."
         )
 
     # -- bantuan tes -------------------------------------------------------

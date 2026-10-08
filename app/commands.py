@@ -33,19 +33,24 @@ from app.logging_setup import append_run_log, run_record
 from app.reporting import RichReporter
 from domain.book import BookRequest, BookSpec, StyleGuide
 from domain.chapter import ChapterRecord
+from domain.document import Document
 from domain.enums import is_approved, is_problem
 from domain.errors import (
     BookNotPlannedError,
     BukuAjarError,
     ChapterNotPlannedError,
+    ConfigError,
     InputError,
     ServiceUnavailableError,
     StateCorruptError,
 )
 from domain.rendering import render_book_markdown, render_chapter_markdown
 from domain.state import RunReport
+from ingestion.document_normalizer import normalize_documents
+from ingestion.loader import IngestedFile, OcrRoute, load_reference_files
 from memory.project_state import BOOK_FILENAME
 from models.ollama_client import list_installed_models, probe_model
+from rag.chunker import chunk_documents
 
 #: Peran yang **tidak** boleh diprobe dengan ``chat`` karena modelnya bukan
 #: model bahasa. Memanggil ``chat`` pada ``nomic-embed-text`` akan gagal dan
@@ -474,21 +479,35 @@ def warn_dry_run(reporter: RichReporter, params: RunParams) -> None:
         )
 
 
-def warn_unimplemented(reporter: RichReporter, params: RunParams) -> None:
-    """Beri tahu bahwa ``--references`` / ``--latex-template`` belum berfungsi.
+def warn_flag_limits(reporter: RichReporter, params: RunParams, config: AppConfig) -> None:
+    """Jelaskan batas dua flag yang **tidak** berpengaruh pada perintah ini.
 
-    Diterima dan dicatat di ``BookRequest``, lalu **diperingatkan**. Menolaknya
-    akan membuat baris invokasi §42 gagal; menerimanya diam-diam akan membuat
-    pengguna mengira referensinya dipakai padahal tidak. Memperingatkan adalah
-    satu-satunya pilihan yang jujur — dan ia membuat celahnya terlihat, bukan
-    sunyi.
+    ``--references`` sekarang sungguh dipakai — oleh ``ingest``, yang membangun
+    indeks dari direktori itu. Tetapi ``plan`` dan ``run`` tidak membacanya sama
+    sekali: yang mereka baca adalah indeks yang sudah ada di ``knowledge/``.
+    Diam-diam menerimanya akan membuat pengguna mengira bahan rujukan barusan
+    sudah ikut dipakai pada jalankan ini, padahal indeksnya masih yang lama — atau
+    bahkan belum ada. Karena itu perbedaannya disebut, bukan disembunyikan, dan
+    arahkan ke perintah yang benar.
+
+    ``--latex-template`` memang belum berfungsi; keluaran saat ini masih Markdown.
+    Diterima dan dicatat di ``BookRequest`` karena baris invokasi §42 memuatnya,
+    dan menolaknya akan membuat baris itu gagal.
     """
-    if params.references is not None:
+    if params.references is not None and not config.rag.enabled:
         reporter.warn(
-            f"--references {params.references} dicatat di BookRequest, tetapi ingestion "
-            "referensi belum diimplementasikan. Paket riset akan terdegradasi dan setiap "
-            "klaim faktual ditandai di 'unresolved_claims'."
+            f"--references {params.references} diabaikan pada jalankan ini: blok 'rag' "
+            "di konfigurasi sedang dimatikan, sehingga peneliti tidak mengambil bahan "
+            "sama sekali. Paket riset akan terdegradasi dan setiap klaim faktual "
+            "ditandai di 'unresolved_claims'."
         )
+    elif params.references is not None:
+        reporter.info(
+            f"--references {params.references} hanya dipakai oleh perintah 'ingest'. "
+            "Peneliti membaca indeks di knowledge/ — jalankan 'ingest' lebih dulu "
+            "agar bahannya benar-benar terbaca."
+        )
+
     if params.latex_template is not None:
         reporter.warn(
             f"--latex-template {params.latex_template} dicatat di BookRequest, tetapi "
@@ -526,8 +545,8 @@ def _plan(params: RunParams, reporter: RichReporter) -> int:
     if params.rps is None:
         raise InputError("RPS", "(belum diberikan)", "sebutkan jalurnya dengan --rps PATH")
 
-    warn_unimplemented(reporter, params)
     container = open_container(params, reporter)
+    warn_flag_limits(reporter, params, container.config)
     request = build_request(params, container.config, rps_text=read_input_file("RPS", params.rps))
 
     spec, notes = container.director.plan(request)
@@ -569,10 +588,10 @@ def do_run(params: RunParams) -> int:
 
 
 def _run(params: RunParams, reporter: RichReporter) -> int:
-    warn_unimplemented(reporter, params)
     warn_dry_run(reporter, params)
 
     container = open_container(params, reporter)
+    warn_flag_limits(reporter, params, container.config)
     started_at = container.clock.now_iso()
     spec = _ensure_planned(params, reporter, container)
 
@@ -623,6 +642,141 @@ def _write_chapter(number: int, params: RunParams, reporter: RichReporter) -> in
     record = container.director.run_chapter(number, force=params.force)
     reporter.chapter_finished(record)
     return 1 if is_problem(record.status) else 0
+
+
+# ---------------------------------------------------------------------------
+# ingest
+# ---------------------------------------------------------------------------
+def do_ingest(params: RunParams) -> int:
+    """Bangun ulang indeks vektor dari direktori bahan rujukan (§10, §13).
+
+    Perintah tersendiri, bukan efek samping ``run``. Alasan yang sama yang
+    tertulis di :class:`~app.config.RagConfig`: menyalakan RAG pada indeks yang
+    belum dibangun harus **terlihat** — dan di sini ia terlihat, karena membangun
+    indeks adalah tindakan yang disebut namanya.
+    """
+    reporter = build_console_reporter(verbose=params.globals.verbose)
+    return guarded(reporter, lambda: _ingest(params, reporter))
+
+
+def _ingest(params: RunParams, reporter: RichReporter) -> int:
+    container = open_container(params, reporter)
+    store = container.indexer
+    if store is None:
+        raise ConfigError(
+            "Indeks vektor tidak dirakit pada jalankan ini (--dry-run). "
+            "Bangun indeksnya dengan 'ingest' tanpa --dry-run."
+        )
+
+    directory = (
+        params.references if params.references is not None else container.paths.input / "references"
+    )
+    rag = container.config.rag
+    ocr = OcrRoute(model=container.router.chat("vision"), prompts=container.prompts)
+
+    files = load_reference_files(directory, ocr=ocr, ocr_min_chars=rag.ocr_min_chars_per_page)
+    if not files:
+        reporter.warn(
+            f"Tidak ada bahan rujukan di {directory}. Akhiran yang dikenali: "
+            ".pdf, .md, .txt, .tex. Indeks lama tidak diubah."
+        )
+        return 1
+
+    plan = _chunk_by_file(files, chunk_chars=rag.chunk_chars, overlap_chars=rag.chunk_overlap)
+    chunks = tuple(chunk for _, _, item_chunks in plan for chunk in item_chunks)
+    if not chunks:
+        reporter.warn(
+            f"{len(files)} berkas terbaca, tetapi tidak satu pun memuat teks yang dapat "
+            "diindeks. Indeks lama tidak diubah - periksa apakah berkasnya benar-benar kosong."
+        )
+        return 1
+
+    # ``reset`` **sesudah** kedua penjagaan di atas, bukan sebelumnya: bahan yang
+    # salah direktori atau berkas kosong akan menghapus indeks yang baik tanpa
+    # menggantinya dengan apa pun, dan seluruh bab sesudahnya akan menulis tanpa
+    # rujukan — persis kegagalan yang paling mahal di jalur ini.
+    store.reset()
+    written = store.index(chunks)
+    _print_ingest_report(
+        reporter,
+        plan,
+        written=written,
+        index_dir=container.paths.vector_store_dir,
+    )
+    return 0
+
+
+def _chunk_by_file(
+    files: tuple[IngestedFile, ...],
+    *,
+    chunk_chars: int,
+    overlap_chars: int,
+) -> tuple[tuple[IngestedFile, tuple[Document, ...], tuple[Document, ...]], ...]:
+    """Rapikan lalu potong tiap berkas, dan kembalikan ketiganya berpasangan (MURNI).
+
+    Dikerjakan per berkas, bukan sekali untuk seluruh korpus, semata supaya
+    laporannya dapat menyebut jumlah potongan **per berkas**: berapa banyak yang
+    masuk dari tiap bahan adalah pertanyaan pertama yang muncul ketika hasil
+    pencarian terasa kurang, dan menghitungnya belakangan berarti memotong ulang
+    seluruh korpus hanya untuk sebuah tabel.
+    """
+    plan: list[tuple[IngestedFile, tuple[Document, ...], tuple[Document, ...]]] = []
+    for item in files:
+        documents = normalize_documents(item.documents)
+        plan.append(
+            (
+                item,
+                documents,
+                chunk_documents(
+                    documents,
+                    chunk_chars=chunk_chars,
+                    overlap_chars=overlap_chars,
+                ),
+            )
+        )
+    return tuple(plan)
+
+
+def _print_ingest_report(
+    reporter: RichReporter,
+    plan: tuple[tuple[IngestedFile, tuple[Document, ...], tuple[Document, ...]], ...],
+    *,
+    written: int,
+    index_dir: Path,
+) -> None:
+    """Cetak apa yang masuk ke indeks, per berkas."""
+    table = Table(title=f"Indeks vektor: {index_dir}", header_style="bold")
+    table.add_column("berkas")
+    table.add_column("dokumen", justify="right")
+    table.add_column("potongan", justify="right")
+    table.add_column("jalur")
+
+    for item, documents, chunks in plan:
+        table.add_row(
+            item.filename,
+            str(len(documents)),
+            str(len(chunks)),
+            "[yellow]OCR[/yellow]" if item.used_ocr else "teks",
+        )
+    reporter.console.print(table)
+
+    total_documents = sum(len(documents) for _, documents, _ in plan)
+    total_chunks = sum(len(chunks) for _, _, chunks in plan)
+    reporter.console.print(
+        f"[green]{len(plan)} berkas, {total_documents} dokumen, {total_chunks} potongan "
+        f"diindeks.[/green]"
+    )
+    if written != total_chunks:
+        reporter.warn(
+            f"{total_chunks - written} potongan tidak masuk: id-nya sama dengan potongan "
+            "berkas lain (dua berkas bernama sama di subdirektori berbeda). Indeks memuat "
+            f"{written} potongan unik - ganti nama salah satunya bila keduanya memang "
+            "bahan yang berbeda."
+        )
+    reporter.info(
+        "Bahan yang diganti cukup di-*ingest* ulang: id potongan diturunkan dari "
+        "nama berkas, halaman, dan nomor paragraf."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -826,6 +980,7 @@ __all__ = [
     "build_request",
     "do_doctor",
     "do_export",
+    "do_ingest",
     "do_plan",
     "do_run",
     "do_status",
@@ -836,5 +991,5 @@ __all__ = [
     "read_input_file",
     "select_chapters",
     "warn_dry_run",
-    "warn_unimplemented",
+    "warn_flag_limits",
 ]

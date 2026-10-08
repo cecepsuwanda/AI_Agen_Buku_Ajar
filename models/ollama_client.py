@@ -186,7 +186,14 @@ class OllamaChatModel:
         messages = []
         if request.system.strip():
             messages.append({"role": "system", "content": request.system})
-        messages.append({"role": "user", "content": request.user})
+
+        user_message: dict[str, Any] = {"role": "user", "content": request.user}
+        if request.images:
+            # Gambar melekat pada pesan pengguna, bukan pada tingkat atas payload:
+            # itulah bentuk yang dinyatakan SDK Ollama, dan ia yang membuat model
+            # vision menerima halaman pada giliran yang benar.
+            user_message["images"] = list(request.images)
+        messages.append(user_message)
 
         payload: dict[str, Any] = {
             "model": request.model or self._spec.model,

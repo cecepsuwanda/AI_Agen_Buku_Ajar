@@ -16,7 +16,7 @@ from agents.example_writer import ExampleWriterAgent, ExampleWriterGate
 from agents.exercise_writer import ExerciseWriterAgent, ExerciseWriterGate
 from agents.gates import PassThroughGate, build_gates, register_gate, registered_gate_names
 from agents.planner import BookPlanner
-from agents.researcher import NullResearcher
+from agents.researcher import NullResearcher, RagResearcher
 from agents.reviewer import ChapterReviewer, ChapterReviewerAgent
 from agents.writer import ChapterWriter
 
@@ -34,6 +34,7 @@ __all__ = [
     "ExerciseWriterGate",
     "NullResearcher",
     "PassThroughGate",
+    "RagResearcher",
     "StructuredAgent",
     "build_gates",
     "register_gate",

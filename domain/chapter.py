@@ -25,13 +25,34 @@ class Evidence(FrozenModel):
     score: float | None = None
 
 
+class ResearchFindings(FrozenModel):
+    """Penyaringan bukti menjadi bahan yang siap dipakai penulis (§17, §36).
+
+    Ini **keluaran model** riset, dan ia sengaja tidak memuat ``evidence`` maupun
+    ``sources``. Keduanya sudah dimiliki program sebelum model dipanggil — model
+    hanya dipanggil untuk hal yang memang butuh penilaian: dari potongan bukti
+    yang ditemukan retriever, mana yang merupakan konsep, mana yang definisi, dan
+    mana yang contoh. Meminta model mengembalikan ulang ``source``/``page`` akan
+    membuatnya dapat **mengarang** halaman, dan kutipan yang menunjuk halaman
+    yang salah persis jenis kesalahan yang tidak dapat ditemukan manusia.
+
+    Bentuknya sengaja tiga daftar pendek, bukan prosa: penulis memakai bahan ini
+    sebagai rujukan, dan rujukan berbentuk prosa akan disalin apa adanya ke dalam
+    bab.
+    """
+
+    concepts: tuple[str, ...] = ()
+    definitions: tuple[str, ...] = ()
+    examples: tuple[str, ...] = ()
+
+
 class ResearchPackage(FrozenModel):
     """Keluaran Research Agent (§17).
 
-    **Placeholder pada MVP.** ``degraded=True`` berarti paket ini dihasilkan
-    tanpa retrieval — yaitu seluruhnya pada iterasi ini, karena RAG belum ada.
-    Bendera itu disimpan ke checkpoint, sehingga menjalankan ulang bab yang sama
-    setelah RAG tersedia akan memperbaikinya, bukan mengulang dari nol.
+    ``degraded=True`` berarti paket ini dihasilkan tanpa retrieval — keadaan
+    jujur ketika RAG dimatikan atau indeksnya masih kosong. Bendera itu disimpan
+    ke checkpoint, sehingga menjalankan ulang bab yang sama setelah indeks
+    terbangun akan memperbaikinya, bukan mengulang dari nol.
     """
 
     concepts: tuple[str, ...] = ()

@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from app.prompting import FilePromptLibrary
+from agents.context import evidence_lines
 from domain.chapter import Evidence, ResearchPackage
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +39,7 @@ def prompt_library(prompts_dir: Path) -> FilePromptLibrary:
 
 @pytest.fixture
 def empty_research() -> ResearchPackage:
-    """Paket riset kosong — kondisi seluruh MVP ini (RAG belum ada).
+    """Paket riset kosong — kondisi ketika RAG mati atau indeksnya belum dibangun.
 
     ``degraded=True`` adalah bagian pentingnya: writer harus bekerja tanpanya,
     dan tes harus memastikan ia memang bekerja.
@@ -46,22 +47,39 @@ def empty_research() -> ResearchPackage:
     return ResearchPackage.empty()
 
 
+def _fixture_evidence() -> tuple[Evidence, ...]:
+    """Bukti contoh, bentuknya persis seperti yang dikembalikan retriever (§13).
+
+    Satu halaman untuk dua potongan yang berurutan: itulah yang membuat tes
+    halaman dapat membuktikan bahwa ``page`` benar-benar diteruskan ke dalam
+    prompt, bukan sekadar ada di dalam tipe.
+    """
+    return (
+        Evidence(
+            source="Cormen, Introduction to Algorithms, 4th ed.",
+            page=45,
+            section="3.1",
+            text="Notasi asimtotik menggambarkan laju pertumbuhan.",
+            score=0.91,
+        ),
+        Evidence(
+            source="Cormen, Introduction to Algorithms, 4th ed.",
+            page=46,
+            section="3.2",
+            text="O(n) berarti waktu eksekusi tumbuh linear terhadap masukan.",
+            score=0.84,
+        ),
+    )
+
+
 @pytest.fixture
 def full_research() -> ResearchPackage:
-    """Paket riset terisi — kondisi setelah RAG tersedia (Tahap 3)."""
+    """Paket riset terisi — kondisi ketika bahan bersumber halaman tersedia (§17)."""
     return ResearchPackage(
         concepts=("kompleksitas waktu", "notasi Big-O"),
         definitions=("O(n) berarti waktu eksekusi tumbuh linear terhadap masukan.",),
         examples=("Pencarian linear pada larik.",),
-        evidence=(
-            Evidence(
-                source="Cormen, Introduction to Algorithms, 4th ed.",
-                page=45,
-                section="3.1",
-                text="Notasi asimtotik menggambarkan laju pertumbuhan.",
-                score=0.91,
-            ),
-        ),
+        evidence=_fixture_evidence(),
         sources=("Cormen, Introduction to Algorithms, 4th ed.",),
         degraded=False,
     )
@@ -120,6 +138,12 @@ def prompt_contexts(
             "rps_text": "Minggu 1: Pengantar algoritma.\nMinggu 2: Notasi Big-O.",
         },
         "planner.chapter": {**common, "planned_sections": ("Pengantar", "Notasi Big-O")},
+        "ocr.page": {"page": 7},
+        "researcher.chapter": {
+            **common,
+            "section_plan": ("Pengantar", "Notasi Big-O"),
+            "evidence": evidence_lines(_fixture_evidence()),
+        },
         "writer.chapter": {
             **common,
             "section_plan": ("Pengantar", "Notasi Big-O"),

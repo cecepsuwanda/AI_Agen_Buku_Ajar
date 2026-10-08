@@ -38,6 +38,7 @@ from app.commands import (
     RunParams,
     do_doctor,
     do_export,
+    do_ingest,
     do_plan,
     do_run,
     do_status,
@@ -82,7 +83,7 @@ RpsOpt = Annotated[
 ]
 ReferencesOpt = Annotated[
     Optional[Path],
-    typer.Option("--references", help="Direktori referensi. [belum diimplementasikan]"),
+    typer.Option("--references", help="Direktori bahan rujukan (default: input/references/)."),
 ]
 LatexTemplateOpt = Annotated[
     Optional[Path],
@@ -478,6 +479,35 @@ def write_chapter(
 
 
 # ---------------------------------------------------------------------------
+# ingest
+# ---------------------------------------------------------------------------
+@app.command()
+def ingest(
+    ctx: typer.Context,
+    config: ConfigOpt = None,
+    profile: ProfileOpt = None,
+    set_model: SetModelOpt = None,
+    verbose: VerboseOpt = None,
+    log_json: LogJsonOpt = None,
+    references: ReferencesOpt = None,
+) -> None:
+    """Bangun indeks vektor dari direktori bahan rujukan (§10, §13)."""
+    raise typer.Exit(
+        code=do_ingest(
+            _params(
+                ctx,
+                config=config,
+                profile=profile,
+                set_model=set_model,
+                verbose=verbose,
+                log_json=log_json,
+                references=references,
+            )
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------
 @app.command()
@@ -546,6 +576,7 @@ __all__ = [
     "configure_stdio",
     "doctor",
     "export",
+    "ingest",
     "main",
     "plan",
     "root",
