@@ -8,11 +8,19 @@ disiplin penulis prompt.
 Ini satu-satunya panggilan yang melihat **seluruh RPS, semua topik, dan panduan
 gaya sekaligus** — karena itu ia dipetakan ke model berkonteks terbesar, dan
 dibayar tepat sekali per buku.
+
+Yang sampai ke model bukan berkas RPS mentah, melainkan ringkasannya dari
+:mod:`ingestion.rps_loader` + :func:`~domain.rps.render_course_plan` (§12): isi
+yang sama, dengan nomor minggu dan kode CPMK yang disebut eksplisit. Yang tetap
+milik model adalah **pengelompokan** — minggu mana yang sekeluarga dan layak
+menjadi satu bab. Yang bukan miliknya adalah minggu yang tidak ada, dan itu
+diperiksa :func:`~domain.rules.align_source_weeks`.
 """
 
 from __future__ import annotations
 
 from domain.book import BookRequest, BookSpec
+from domain.rps import CoursePlan
 from domain.rules import reconcile_book_spec
 
 from agents.base import StructuredAgent
@@ -25,12 +33,21 @@ class BookPlanner(StructuredAgent[BookSpec]):
     prompt_name = "planner.book"
 
     def plan(
-        self, request: BookRequest, *, style_guide: str = ""
+        self,
+        request: BookRequest,
+        *,
+        style_guide: str = "",
+        course: CoursePlan | None = None,
     ) -> tuple[BookSpec, tuple[str, ...]]:
         """Hasilkan spesifikasi buku dari ``request`` (§15).
 
         :param style_guide: panduan gaya dari ``config.yaml``. Dikirim ke model
             supaya ia dapat menyesuaikan tingkat kedalaman dan gaya penamaan bab.
+        :param course: RPS yang sudah diuraikan (§12). Bila ada, ``source_weeks``
+            keluaran model diperiksa terhadap kalender RPS — minggu adalah fakta
+            RPS, bukan sesuatu yang boleh dikarang. ``None`` berarti RPS-nya tidak
+            dapat diuraikan; pemetaan minggu saat itu tidak diperiksa, karena tidak
+            ada yang dapat dipakai untuk memeriksanya.
 
         :returns: ``(spesifikasi, catatan)``. Catatan berisi hal-hal yang perlu
             diketahui pengguna — terutama bila jumlah bab tidak sesuai
@@ -49,7 +66,11 @@ class BookPlanner(StructuredAgent[BookSpec]):
             }
         )
 
-        return reconcile_book_spec(produced, target_chapters=request.target_chapters)
+        return reconcile_book_spec(
+            produced,
+            target_chapters=request.target_chapters,
+            course=course,
+        )
 
 
 __all__ = ["BookPlanner"]

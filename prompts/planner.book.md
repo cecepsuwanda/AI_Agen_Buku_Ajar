@@ -33,35 +33,53 @@ ulang oleh agen berikutnya, dan usaha Anda terbuang.
 {% endfor %}
 {% endif %}
 
-**Isi RPS:**
+**RPS:**
 
 {{ rps_text }}
 
+Bila berkas RPS-nya mengenali bagian-bagiannya, yang Anda terima di atas adalah
+**ringkasan terstruktur**-nya — memuat bagian yang sama dengan berkas aslinya
+(identitas, deskripsi, CPL, CPMK, Sub-CPMK, kalender mingguan, metode penilaian,
+referensi, dan bagian lain apa adanya), dengan nomor minggu dan kode capaian
+yang disebut eksplisit. Bila tidak, yang Anda terima adalah isi berkasnya apa
+adanya. Dalam kedua hal: pakailah angka dan kode yang benar-benar tertulis di
+sana, jangan menghitung atau mengarang sendiri.
+
 # ATURAN
 
-1. **Tepat {{ target_chapters }} bab.** Tidak kurang, tidak lebih. RPS sering
-   memuat lebih banyak pertemuan daripada jumlah bab yang diminta — gabungkan
-   pertemuan yang sekeluarga menjadi satu bab, dan sebutkan minggu asalnya di
-   `source_weeks`.
-2. **Urutan mengikuti RPS.** Bab 1 adalah materi paling awal. Jangan
-   mengurutkan ulang berdasarkan selera Anda.
-3. **Satu bab = satu kompetensi yang dapat dinilai.** Bila dua pertemuan
+1. **Tepat {{ target_chapters }} bab.** Tidak kurang, tidak lebih. Kalender RPS
+   sering memuat lebih banyak minggu daripada jumlah bab yang diminta —
+   gabungkan minggu yang sekeluarga menjadi satu bab, dan isi `source_weeks`
+   dengan minggu-minggu yang dicakup bab itu.
+2. **`source_weeks` diisi dari kalender, bukan dari ingatan.** Tulis
+   `["Minggu 1-2"]` untuk dua minggu berurutan, atau `["Minggu 7", "Minggu 9"]`
+   bila ada minggu ujian di antaranya. Setiap minggu kuliah harus dipakai **tepat
+   satu kali** oleh tepat satu bab — kalau tidak, buku akan memuat materi yang
+   tidak pernah ditulis, atau menulisnya dua kali.
+3. **Minggu penilaian bukan bahan bab.** Minggu yang bertanda `[MINGGU
+   PENILAIAN]` — ujian tengah semester, ujian akhir semester, dan sejenisnya —
+   tidak punya materi untuk ditulis. Jangan mencantumkannya di `source_weeks`,
+   dan jangan membuat bab tentangnya.
+4. **Urutan mengikuti RPS.** Bab 1 adalah materi paling awal, bab terakhir adalah
+   materi paling akhir. Jangan mengurutkan ulang berdasarkan selera Anda.
+5. **Satu bab = satu kompetensi yang dapat dinilai.** Bila dua minggu
    mengajarkan hal yang sama sekali berbeda, keduanya bab yang berbeda.
-4. **`objectives` harus dapat diukur.** Tulis "Mahasiswa mampu menghitung
+6. **`objectives` harus dapat diukur.** Tulis "Mahasiswa mampu menghitung
    kompleksitas waktu algoritma pengurutan" — bukan "Mahasiswa memahami
    algoritma pengurutan". Kata kerja yang tidak dapat dinilai ("memahami",
-   "mengerti", "mengetahui") dilarang.
-5. **`sections` adalah kerangka isi bab, bukan judul bab.** Untuk setiap bab,
+   "mengerti", "mengetahui") dilarang. Ambil dari CPMK/Sub-CPMK di RPS bila ada.
+7. **`sections` adalah kerangka isi bab, bukan judul bab.** Untuk setiap bab,
    sebutkan 3–6 sub-bagian yang akan ditulis. Sub-bagian ini yang akan diikuti
    penulis, jadi buatlah cukup spesifik untuk ditulis dan cukup umum untuk
    tidak mengekang.
-6. **`references` hanya boleh memuat sumber yang benar-benar ada di RPS atau
-   yang Anda yakini kuat.** Jangan mencantumkan buku yang Anda tidak yakin
+8. **`references` hanya boleh memuat sumber yang benar-benar ada di daftar
+   referensi RPS.** Jangan mencantumkan buku yang Anda tidak yakin
    keberadaannya. Daftar rujukan kosong jauh lebih baik daripada daftar yang
    memuat satu judul karangan.
-7. **Jangan mengarang isi RPS.** Bila RPS tidak menyebutkan suatu topik,
+9. **Jangan mengarang isi RPS.** Bila RPS tidak menyebutkan suatu topik,
    jangan tambahkan topik itu karena "seharusnya ada". Buku ini harus dapat
-   dipertanggungjawabkan terhadap RPS yang diberikan.
+   dipertanggungjawabkan terhadap RPS yang diberikan. Ketentuan tambahan yang
+   ditulis penyusun RPS di bagian "Catatan Penyusunan Buku" juga mengikat.
 
 # OUTPUT
 

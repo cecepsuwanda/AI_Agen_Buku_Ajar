@@ -45,9 +45,11 @@ from domain.errors import (
     StateCorruptError,
 )
 from domain.rendering import render_book_markdown, render_chapter_markdown
+from domain.rps import CoursePlan, render_course_plan
 from domain.state import RunReport
 from ingestion.document_normalizer import normalize_documents
 from ingestion.loader import IngestedFile, OcrRoute, load_reference_files
+from ingestion.rps_loader import parse_rps
 from memory.project_state import BOOK_FILENAME
 from models.ollama_client import list_installed_models, probe_model
 from rag.chunker import chunk_documents
@@ -180,6 +182,40 @@ def _default_title(rps: Path | None) -> str:
         return "Buku Ajar"
     stem = rps.stem.replace("_", " ").replace("-", " ").strip()
     return stem.title() or "Buku Ajar"
+
+
+@dataclass(frozen=True, slots=True)
+class RpsInput:
+    """RPS yang sudah dibaca **dan** diuraikan (§12).
+
+    Ketiganya dibawa bersama karena ketiganya harus konsisten: teks yang dibaca
+    perencana, kalender yang dipakai memeriksa minggu, dan catatan tentang apa yang
+    tidak terbaca. Memisahkannya menjadi tiga panggilan akan memungkinkan pemanggil
+    membaca RPS sekali dan mengurainya dari teks yang lain.
+    """
+
+    #: Teks yang dikirim ke Book Planner — ringkasan terstruktur, bukan berkas mentah.
+    text: str
+    #: RPS terurai; ``None`` bila berkasnya tidak memuat bagian yang dikenali.
+    course: CoursePlan | None
+    #: Catatan penguraian — apa yang tidak terbaca, dan apa yang janggal.
+    notes: tuple[str, ...]
+
+
+def read_rps_file(path: Path) -> RpsInput:
+    """Baca berkas RPS, uraikan, dan siapkan teksnya untuk perencana (§12).
+
+    Bila berkasnya tidak memuat satu pun bagian yang dikenali, teks **mentahnya**
+    yang diteruskan dan ``course`` bernilai ``None``. Dua akibatnya disebut
+    terang-terangan: perencana tetap mendapat isi RPS apa pun bentuknya (perilaku
+    yang sama seperti sebelum pengurai ini ada), dan pemeriksaan pemetaan minggu
+    dimatikan karena tidak ada kalender yang dapat dipakai memeriksanya.
+    """
+    raw = read_input_file("RPS", path)
+    course, notes = parse_rps(raw)
+    if course.is_empty():
+        return RpsInput(text=raw, course=None, notes=notes)
+    return RpsInput(text=render_course_plan(course), course=course, notes=notes)
 
 
 def select_chapters(
@@ -547,11 +583,27 @@ def _plan(params: RunParams, reporter: RichReporter) -> int:
 
     container = open_container(params, reporter)
     warn_flag_limits(reporter, params, container.config)
-    request = build_request(params, container.config, rps_text=read_input_file("RPS", params.rps))
+    rps = read_rps_file(params.rps)
+    report_rps_notes(reporter, params.rps, rps.notes)
+    request = build_request(params, container.config, rps_text=rps.text)
 
-    spec, notes = container.director.plan(request)
+    spec, notes = container.director.plan(request, course=rps.course)
     _print_spec(reporter, spec, notes)
     return 0
+
+
+def report_rps_notes(reporter: RichReporter, path: Path, notes: tuple[str, ...]) -> None:
+    """Sebutkan apa yang tidak terbaca dari RPS — sebelum babnya ditulis.
+
+    Diperingatkan lebih dulu, bukan dilaporkan di akhir: penguraian yang meleset
+    berarti seluruh rencana buku berdiri di atas RPS yang salah baca, dan yang
+    perlu mengetahui itu adalah orang yang baru saja mengetik ``--rps``.
+    """
+    if not notes:
+        return
+    reporter.warn(f"Catatan penguraian RPS {path}:")
+    for note in notes:
+        reporter.warn(f"  - {note}")
 
 
 def _print_spec(reporter: RichReporter, spec: BookSpec, notes: tuple[str, ...]) -> None:
@@ -624,8 +676,10 @@ def _ensure_planned(params: RunParams, reporter: RichReporter, container: Contai
     if params.rps is None:
         raise BookNotPlannedError(container.paths.state / BOOK_FILENAME)
 
-    request = build_request(params, container.config, rps_text=read_input_file("RPS", params.rps))
-    spec, notes = container.director.plan(request)
+    rps = read_rps_file(params.rps)
+    report_rps_notes(reporter, params.rps, rps.notes)
+    request = build_request(params, container.config, rps_text=rps.text)
+    spec, notes = container.director.plan(request, course=rps.course)
     _print_spec(reporter, spec, notes)
     return spec
 
@@ -976,6 +1030,7 @@ __all__ = [
     "DoctorReport",
     "GlobalOptions",
     "RoleCheck",
+    "RpsInput",
     "RunParams",
     "build_request",
     "do_doctor",
@@ -989,6 +1044,8 @@ __all__ = [
     "load_spec",
     "open_container",
     "read_input_file",
+    "read_rps_file",
+    "report_rps_notes",
     "select_chapters",
     "warn_dry_run",
     "warn_flag_limits",

@@ -76,6 +76,7 @@ from domain.rules import (
     with_gate_result,
     with_research,
 )
+from domain.rps import CoursePlan
 from domain.state import BookState, RunReport
 from domain.transitions import can_advance, status_after_gate, transition
 
@@ -230,15 +231,26 @@ class BookDirector:
     # -----------------------------------------------------------------
     # Tingkat buku
     # -----------------------------------------------------------------
-    def plan(self, request: BookRequest) -> tuple[BookSpec, tuple[str, ...]]:
+    def plan(
+        self,
+        request: BookRequest,
+        *,
+        course: CoursePlan | None = None,
+    ) -> tuple[BookSpec, tuple[str, ...]]:
         """Susun ``BookSpec`` dari ``request`` dan simpan ke checkpoint (§15).
 
         Aman dijalankan ulang: spesifikasi lama diganti, sedangkan record bab
         yang sudah dikerjakan **tidak tersentuh** — mereka hidup di berkasnya
         sendiri. Merencanakan ulang karena itu tidak menghapus pekerjaan yang
         sudah ada, hanya mengganti rencananya.
+
+        :param course: RPS terurai (§12), bila ada. Diteruskan apa adanya ke
+            perencana; director tidak memakainya sendiri — ia tidak perlu tahu
+            apa itu minggu.
         """
-        spec, notes = self._planner.plan(request, style_guide=self._settings.style_guide)
+        spec, notes = self._planner.plan(
+            request, style_guide=self._settings.style_guide, course=course
+        )
 
         # Record yang sudah ada dibaca ulang dan ditempelkan, supaya
         # ``BookState.chapters`` tidak menyimpan potret basi dari perencanaan

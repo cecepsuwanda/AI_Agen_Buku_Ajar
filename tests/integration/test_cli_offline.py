@@ -259,6 +259,14 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
     assert "# opsi    : (bawaan server)" not in planner
     assert "versi 0+" not in planner  # §38: versi prompt harus terisi, bukan nol
 
+    # §12: yang sampai ke perencana adalah RPS yang sudah **diuraikan**, bukan
+    # berkas mentahnya — nomor minggu disebut eksplisit di sana, minggu ujian
+    # ditandai, dan komentar penulis berkas RPS tidak ikut terbawa sebagai isi.
+    assert "## Kalender Mingguan" in planner
+    assert "- Minggu 9: Pohon seimbang" in planner
+    assert "[MINGGU PENILAIAN — bukan bahan bab]" in planner
+    assert "menyusul di Tahap" not in planner, "komentar RPS bukan isi RPS"
+
     # Perincian per bab (§16) benar-benar diminta, dan memakai modelnya sendiri:
     # setiap peran dipetakan ke model oleh config, bukan oleh agent (§6).
     chapter_planner = prompts["02-chapter_planner.txt"]
@@ -268,6 +276,16 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
 
     # Rencana tersusun otomatis: baris invokasi §42 tidak menuntut 'plan' lebih dulu.
     assert (layout.sandbox_state / "book.json").is_file()
+
+    # §12: ``source_weeks`` benar-benar terisi, dan diisi dari kalender RPS —
+    # bukan dari keluaran perencana. Model dry-run menyintesis BookSpec dari
+    # skema, jadi ia tidak menghasilkan satu pun minggu; tanpa aturan pemetaan,
+    # bab ini akan lolos ke penulisan tanpa menunjuk materi mana pun. Yang
+    # muncul adalah seluruh minggu kuliah RPS, dengan minggu 8 (ujian tengah
+    # semester) di luar rentangnya.
+    book = json.loads((layout.sandbox_state / "book.json").read_text(encoding="utf-8"))
+    assert book["spec"]["chapters"][0]["source_weeks"] == ["Minggu 1-7, 9-15"]
+
     chapter = json.loads((layout.sandbox_state / "chapter01.json").read_text(encoding="utf-8"))
     assert chapter["status"] == "APPROVED"
     assert chapter["markdown_path"]
@@ -276,6 +294,52 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
     assert markdown.startswith("# Bab 1.")
     assert "## Contoh" in markdown
     assert "## Latihan" in markdown
+
+
+def test_an_rps_of_another_shape_falls_back_to_raw_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RPS yang tidak dapat diuraikan tetap dikirim apa adanya, dengan peringatan.
+
+    Ini perilaku yang **sama seperti sebelum pengurai ada** — dan itu disengaja.
+    Pengurai yang menghentikan pipeline karena berkas RPS-nya berbentuk lain
+    adalah kemunduran: pengguna yang RPS-nya ditulis di Word lalu diekspor ke
+    teks tetap harus mendapat buku. Yang tidak boleh terjadi hanyalah ia tidak
+    tahu bahwa penguraiannya meleset, sebab ketika itu pemetaan minggu ikut mati
+    dan tidak ada lagi yang memeriksa bab mana menunjuk materi mana.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    foreign = tmp_path / "rps-lain.txt"
+    foreign.write_text(
+        "Mata kuliah ini membahas jaringan komputer.\nPertemuan pertama: pengantar.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BUKUAJAR_OLLAMA_BASE_URL", DEAD_ENDPOINT)
+
+    result = RUNNER.invoke(
+        app, ["run", "--dry-run", "--rps", str(foreign), "--output", str(layout.output)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Catatan penguraian RPS" in result.output
+    assert "tidak memuat satu pun" in result.output
+
+    # Isi berkasnya sampai ke perencana — mentah, karena tidak ada ringkasan
+    # yang dapat dibuat darinya.
+    planner = _dry_run_prompts(layout)["01-planner.txt"]
+    assert "membahas jaringan komputer" in planner
+    assert "## Kalender Mingguan" not in planner
+
+    # Dan tidak ada minggu yang dikarang: tanpa kalender, pemetaan minggunya
+    # dibiarkan apa adanya — keluaran perencana, apa pun isinya — alih-alih diisi
+    # label minggu yang tidak ada yang dapat memeriksa kebenarannya.
+    book = json.loads((layout.sandbox_state / "book.json").read_text(encoding="utf-8"))
+    assert book["spec"]["chapters"]
+    assert not any(
+        label.lower().startswith("minggu")
+        for chapter in book["spec"]["chapters"]
+        for label in chapter["source_weeks"]
+    )
 
 
 def test_dry_run_never_marks_a_chapter_done_for_real(tmp_path, monkeypatch) -> None:

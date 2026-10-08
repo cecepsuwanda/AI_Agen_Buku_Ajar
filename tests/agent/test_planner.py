@@ -24,6 +24,7 @@ from agents.planner import BookPlanner
 from app.prompting import FilePromptLibrary
 from domain.book import BookRequest, BookSpec, ChapterSpec
 from domain.errors import AgentOutputError
+from domain.rps import CoursePlan, WeekPlan
 from domain.rules import reconcile_book_spec
 from tests.fakes.chat_models import SchemaEchoChatModel, ScriptedChatModel
 
@@ -315,3 +316,70 @@ def test_reconcile_is_pure() -> None:
     reconcile_book_spec(spec, target_chapters=1)
 
     assert spec.model_dump() == snapshot
+
+
+# ---------------------------------------------------------------------------
+# course= — RPS terurai sampai ke aturan pemetaan minggu (§12)
+# ---------------------------------------------------------------------------
+def _course() -> CoursePlan:
+    """RPS enam minggu dengan minggu 3 sebagai minggu ujian."""
+    return CoursePlan(
+        weeks=tuple(
+            WeekPlan(number=n, topic=f"Topik {n}", is_assessment=n == 3) for n in range(1, 7)
+        )
+    )
+
+
+def test_the_course_plan_is_forwarded_to_the_week_rule(
+    prompt_library: FilePromptLibrary, request_: BookRequest
+) -> None:
+    """``course=`` benar-benar sampai ke :func:`~domain.rules.align_source_weeks`.
+
+    ``VALID_SPEC`` tidak memuat satu pun ``source_weeks``, jadi bab-babnya tidak
+    menunjuk materi apa pun. Bila parameter itu berhenti di ``BookPlanner`` dan
+    tidak diteruskan, catatan tentang minggu yang tidak terpakai tidak akan
+    pernah muncul — dan itulah satu-satunya tanda bahwa pemetaannya bolong.
+    """
+    model = ScriptedChatModel([VALID_SPEC])
+
+    _, notes = _planner(model, prompt_library).plan(request_, course=_course())
+
+    assert any("minggu kuliah tidak dipakai bab mana pun" in note for note in notes)
+
+
+def test_without_a_course_the_weeks_are_not_examined(
+    prompt_library: FilePromptLibrary, request_: BookRequest
+) -> None:
+    """RPS yang tidak terbaca berarti tidak ada yang dapat dipakai memeriksa.
+
+    Pemetaannya dibiarkan apa adanya — bukan ditebak. Perencana yang bekerja tanpa
+    RPS terurai tetap harus dapat menyelesaikan rencananya.
+    """
+    model = ScriptedChatModel([VALID_SPEC])
+
+    _, notes = _planner(model, prompt_library).plan(request_)
+
+    assert notes == ()
+
+
+def test_a_valid_week_mapping_from_the_model_survives_the_agent(
+    prompt_library: FilePromptLibrary, request_: BookRequest
+) -> None:
+    """Pengelompokan yang sah milik model, dan ia melewati seluruh jalur utuh."""
+    spec_json = json.dumps(
+        {
+            "title": "Algoritma dan Struktur Data",
+            "chapters": [
+                {"number": 1, "title": "A", "source_weeks": ["Minggu 1-2"]},
+                {"number": 2, "title": "B", "source_weeks": ["Minggu 4-6"]},
+            ],
+        },
+        ensure_ascii=False,
+    )
+    model = ScriptedChatModel([spec_json])
+
+    spec, notes = _planner(model, prompt_library).plan(request_, course=_course())
+
+    assert notes == ()
+    assert spec.chapters[0].source_weeks == ("Minggu 1-2",)
+    assert spec.chapters[1].source_weeks == ("Minggu 4-6",)

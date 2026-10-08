@@ -19,6 +19,7 @@ from domain.chapter import (
 from domain.enums import ChapterEvent, ChapterStatus, is_approved
 from domain.errors import ChapterNotPlannedError, InvalidGateError
 from domain.ports import ReviewGate
+from domain.rps import CoursePlan, week_label
 from domain.transitions import can_advance, transition
 
 
@@ -246,11 +247,12 @@ def reconcile_book_spec(
     spec: BookSpec,
     *,
     target_chapters: int,
+    course: CoursePlan | None = None,
 ) -> tuple[BookSpec, tuple[str, ...]]:
     """Rapikan keluaran Book Planner menjadi spesifikasi yang dapat dijalankan (MURNI).
 
-    Dua hal yang **selalu** perlu dirapikan pada keluaran LLM, dan keduanya
-    tidak dapat dicegah oleh skema JSON mana pun:
+    Tiga hal yang **selalu** perlu dirapikan pada keluaran LLM, dan tidak satu pun
+    dapat dicegah oleh skema JSON mana pun:
 
     * **Nomor bab tidak berurutan atau berlompatan.** Skema hanya menuntut
       ``number >= 1``; ia tidak dapat menyatakan "1, 2, 3, … tanpa bolong".
@@ -260,6 +262,12 @@ def reconcile_book_spec(
       bermakna, bukan angka yang kebetulan ditulis model.
     * **Bab tanpa judul.** ``title`` kosong menghasilkan bab yang tidak dapat
       ditulis maupun dirujuk; ia dibuang, bukan dibiarkan menggantung.
+    * **Pemetaan bab ke minggu RPS** (§12). Minggu adalah **fakta RPS**, bukan
+      sesuatu yang boleh dikarang: bab yang mengaku mencakup minggu 8 berarti bab
+      yang isinya ujian tengah semester. Karena itu pemetaannya diperiksa, dan
+      bila tidak sah ia dibagi ulang secara merata — lihat
+      :func:`align_source_weeks`. Pemeriksaan ini hanya berjalan bila RPS-nya
+      berhasil diuraikan (``course`` tidak ``None``).
 
     Penomoran ulang tidak menyembunyikan masalah: setiap perubahan dilaporkan
     sebagai catatan, dan jumlah bab yang tidak sesuai target adalah catatan
@@ -282,6 +290,11 @@ def reconcile_book_spec(
     if [c.number for c in kept] != list(range(1, len(kept) + 1)):
         notes.append("nomor bab dirapikan menjadi berurutan mulai dari 1")
 
+    clean = spec.model_copy(update={"chapters": renumbered})
+    if course is not None:
+        clean, week_notes = align_source_weeks(clean, course)
+        notes.extend(week_notes)
+
     if len(renumbered) != target_chapters:
         notes.append(
             f"perencana menghasilkan {len(renumbered)} bab, "
@@ -291,7 +304,169 @@ def reconcile_book_spec(
     if not renumbered:
         notes.append("tidak ada bab yang dapat dijalankan")
 
-    return spec.model_copy(update={"chapters": renumbered}), tuple(notes)
+    return clean, tuple(notes)
+
+
+# ---------------------------------------------------------------------------
+# Pemetaan bab ke minggu RPS (§12)
+# ---------------------------------------------------------------------------
+def align_source_weeks(
+    spec: BookSpec,
+    course: CoursePlan,
+) -> tuple[BookSpec, tuple[str, ...]]:
+    """Pastikan ``source_weeks`` mengikuti kalender RPS (MURNI, §12).
+
+    Perencana **boleh** memutuskan pengelompokan minggu: hanya ia yang membaca
+    topiknya dan tahu bahwa minggu 1 dan 2 sekeluarga. Yang tidak boleh ia
+    lakukan adalah membuat minggu yang tidak ada. Karena itu aturannya bukan
+    "timpa", melainkan "periksa, dan perbaiki hanya bila tidak sah":
+
+    1. setiap label minggu harus terbaca (``"Minggu 3"``, ``"Minggu 1-2"``, atau
+       ``"3"``);
+    2. setiap minggu harus ada di RPS dan bukan minggu penilaian;
+    3. seluruh minggu kuliah harus terpakai **tepat sekali**, tanpa pengulangan
+       dan tanpa yang hilang — bab yang saling menimpa minggu berarti materi yang
+       ditulis dua kali, dan minggu yang tidak terpakai berarti materi yang tidak
+       pernah ditulis.
+
+    Bila ketiganya terpenuhi, keluaran perencana dipertahankan apa adanya. Bila
+    tidak, minggu kuliah dibagi ulang secara merata menurut urutannya — dan
+    pembagian itu disebut sebagai perbaikan, bukan disamarkan sebagai rencana.
+
+    :returns: ``(spesifikasi, catatan)``. Catatan kosong berarti pemetaan
+        perencana diterima.
+    """
+    weeks = tuple(week.number for week in course.teaching_weeks())
+    if not spec.chapters or not weeks:
+        return spec, ()
+
+    parsed = [parse_week_labels(chapter.source_weeks) for chapter in spec.chapters]
+    if all(labels is not None for labels in parsed):
+        used = [number for labels in parsed if labels for number in labels]
+        problems = _week_problems(used, course=course, teaching=weeks)
+        if not problems:
+            return spec, ()
+    else:
+        problems = ["sebagian label minggu tidak dapat dibaca"]
+
+    groups = even_groups(weeks, len(spec.chapters))
+    chapters = tuple(
+        chapter.model_copy(update={"source_weeks": (week_label(group),) if group else ()})
+        for chapter, group in zip(spec.chapters, groups)
+    )
+    notes = (
+        *problems,
+        f"minggu dibagi ulang secara merata: {_describe_groups(groups)}",
+    )
+    return spec.model_copy(update={"chapters": chapters}), notes
+
+
+def parse_week_labels(labels: Sequence[str]) -> tuple[int, ...] | None:
+    """Baca label minggu menjadi nomor-nomornya; ``None`` bila ada yang tak terbaca (MURNI).
+
+    Bentuk yang diterima sengaja sempit: ``"Minggu 3"``, ``"Minggu 1-2"``,
+    ``"Minggu 7, 9"``, ``"minggu 3"``, ``"3"``, ``"1-2"``. Bentuk yang lebih bebas —
+    "minggu pertama", "awal semester" — dibiarkan tidak terbaca, karena menebaknya
+    berarti menebak, dan yang dipertaruhkan adalah pemetaan materi ke minggu.
+    """
+    numbers: list[int] = []
+    for label in labels:
+        text = label.strip().lower().removeprefix("minggu").strip()
+        # Tanda hubung panjang lazim muncul ketika model menyalin dari dokumen:
+        # "Minggu 9–15". Sama artinya, jadi diperlakukan sama.
+        text = text.replace("–", "-").replace("—", "-")
+        if not text:
+            return None
+        for part in text.split(","):
+            head, dash, tail = part.strip().partition("-")
+            if not head.strip().isdigit():
+                return None
+            first = int(head.strip())
+            if not dash:
+                numbers.append(first)
+                continue
+            if not tail.strip().isdigit():
+                return None
+            last = int(tail.strip())
+            if last < first:
+                return None
+            numbers.extend(range(first, last + 1))
+    return tuple(numbers)
+
+
+def even_groups(items: Sequence[int], count: int) -> tuple[tuple[int, ...], ...]:
+    """Bagi ``items`` menjadi ``count`` kelompok berurutan semerata mungkin (MURNI).
+
+    Sisa pembagian dibagikan ke kelompok-kelompok **awal**, bukan ke yang akhir:
+    bab-bab awal buku biasanya memuat materi dasar yang lebih padat, dan kelompok
+    terakhir yang hanya berisi satu minggu lebih mudah ditulis daripada bab
+    pengantar yang hanya berisi satu minggu.
+
+    ``count`` yang lebih besar daripada jumlah minggu menghasilkan kelompok kosong
+    di ujungnya — dan itu memang keadaan yang sebenarnya: RPS-nya tidak punya cukup
+    minggu untuk sebanyak itu bab.
+    """
+    total = len(items)
+    if count <= 0:
+        return ()
+    base, extra = divmod(total, count)
+    groups: list[tuple[int, ...]] = []
+    start = 0
+    for index in range(count):
+        size = base + (1 if index < extra else 0)
+        groups.append(tuple(items[start:start + size]))
+        start += size
+    return tuple(groups)
+
+
+def _week_problems(
+    used: Sequence[int],
+    *,
+    course: CoursePlan,
+    teaching: Sequence[int],
+) -> list[str]:
+    """Apa yang salah dengan pemetaan minggu yang diusulkan perencana (MURNI).
+
+    "Minggu yang tidak ada" diukur terhadap **seluruh** minggu di RPS, bukan hanya
+    minggu kuliah: minggu 8 memang ada di RPS — ia minggu ujian, dan itulah
+    masalahnya. Melaporkannya sebagai "minggu yang tidak ada" akan menyesatkan
+    orang yang membuka RPS untuk memeriksanya.
+    """
+    problems: list[str] = []
+    existing = {week.number for week in course.weeks}
+
+    unknown = sorted({number for number in used if number not in existing})
+    if unknown:
+        listed = ", ".join(str(number) for number in unknown)
+        problems.append(f"perencana menyebut minggu yang tidak ada di RPS: {listed}")
+
+    exams = sorted({week.number for week in course.assessment_weeks()} & set(used))
+    if exams:
+        listed = ", ".join(str(number) for number in exams)
+        problems.append(
+            f"minggu penilaian dijadikan bahan bab: {listed} — minggu ujian tidak "
+            "memiliki materi untuk ditulis"
+        )
+
+    repeated = sorted({number for number in used if used.count(number) > 1})
+    if repeated:
+        listed = ", ".join(str(number) for number in repeated)
+        problems.append(f"minggu dipakai lebih dari satu bab: {listed}")
+
+    missing = sorted(set(teaching) - set(used))
+    if missing and not problems:
+        listed = ", ".join(str(number) for number in missing)
+        problems.append(f"minggu kuliah tidak dipakai bab mana pun: {listed}")
+
+    if list(used) != sorted(used) and not problems:
+        problems.append("pemetaan minggu tidak berurutan menurut bab")
+
+    return problems
+
+
+def _describe_groups(groups: Sequence[Sequence[int]]) -> str:
+    """Rangkuman pembagian, mis. ``"1-2, 3-4, 5-6"`` (MURNI)."""
+    return ", ".join(week_label(group) or "(kosong)" for group in groups)
 
 
 # ---------------------------------------------------------------------------
