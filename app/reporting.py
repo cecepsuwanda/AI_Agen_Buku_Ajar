@@ -29,6 +29,11 @@ from domain.enums import ChapterStatus, is_problem
 _STATUS_STYLE: dict[ChapterStatus, str] = {
     ChapterStatus.APPROVED: "bold green",
     ChapterStatus.DRAFTED: "cyan",
+    # Dua tahap penulisan sesudah draf (§19, §20) sederajat dengan DRAFTED:
+    # keduanya berarti "karya tulis sudah ada dan bertambah", bukan "sedang
+    # bermasalah" maupun "sudah selesai".
+    ChapterStatus.EXAMPLES_WRITTEN: "cyan",
+    ChapterStatus.EXERCISES_WRITTEN: "cyan",
     ChapterStatus.PLANNED: "dim",
     ChapterStatus.REVISION: "yellow",
     ChapterStatus.FAILED_REVIEW: "bold red",

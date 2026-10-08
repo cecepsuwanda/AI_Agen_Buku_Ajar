@@ -135,6 +135,14 @@ SYSTEMIC_ERRORS: tuple[type[BaseException], ...] = (
 DRAFT_READY_STATUSES: frozenset[ChapterStatus] = frozenset(
     {
         ChapterStatus.DRAFTED,
+        # Tahap penulisan sesudah draf (§19, §20). Keduanya WAJIB ada di sini:
+        # gate contoh dan latihan *mengganti* draf, jadi bab yang dilanjutkan
+        # pada salah satu status ini sudah memegang draf terbaik yang dimilikinya.
+        # Tanpa keduanya, resume akan menulis ulang bab dari nol — membuang draf
+        # yang sudah diperkaya dan membayar satu panggilan writer penuh untuk
+        # mendapat hasil yang berbeda.
+        ChapterStatus.EXAMPLES_WRITTEN,
+        ChapterStatus.EXERCISES_WRITTEN,
         ChapterStatus.FACT_CHECKED,
         ChapterStatus.CITATION_CHECKED,
         ChapterStatus.PEDAGOGY_REVIEWED,

@@ -20,6 +20,8 @@ CHAIN: tuple[ChapterStatus, ...] = (
     ChapterStatus.PLANNED,
     ChapterStatus.RESEARCHED,
     ChapterStatus.DRAFTED,
+    ChapterStatus.EXAMPLES_WRITTEN,
+    ChapterStatus.EXERCISES_WRITTEN,
     ChapterStatus.FACT_CHECKED,
     ChapterStatus.CITATION_CHECKED,
     ChapterStatus.PEDAGOGY_REVIEWED,
@@ -45,6 +47,8 @@ _TRANSITIONS: Mapping[tuple[ChapterStatus, ChapterEvent], ChapterStatus] = {
     (ChapterStatus.REVISION, ChapterEvent.DRAFT): ChapterStatus.DRAFTED,
     # Vonis gate: gagal
     (ChapterStatus.DRAFTED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.EXAMPLES_WRITTEN, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.EXERCISES_WRITTEN, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.FACT_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.CITATION_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.PEDAGOGY_REVIEWED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,

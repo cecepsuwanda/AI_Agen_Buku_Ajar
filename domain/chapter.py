@@ -1,4 +1,4 @@
-"""Tipe tingkat bab (§§16–§18, §21, §36) — MURNI."""
+"""Tipe tingkat bab (§§16–§21, §36) — MURNI."""
 
 from __future__ import annotations
 
@@ -87,6 +87,20 @@ class ReviewResult(FrozenModel):
     kondisi bisnis yang diharapkan (§35), bukan kesalahan. Gate yang dilewati
     (belum diimplementasikan) ditandai ``skipped=True`` — sehingga rantai §27
     tetap terekam utuh meski gate-nya belum ada.
+
+    ``enriched_draft`` membuat gate dapat **memperkaya** draf, bukan sekadar
+    menilainya. Blueprint menaruh Example Agent dan Exercise Agent *sesudah*
+    Chapter Writer (§19, §20), dan §31 bahkan menulis
+    ``draft = writer.revise(draft, fact_result.feedback)`` — jadi ini memang
+    bentuk yang dimaksud blueprint, bukan kelonggaran demi kenyamanan.
+
+    Field ini punya bawaan ``None`` dengan sengaja: gate yang hanya menilai
+    tidak perlu menyentuhnya, dan **skema state tetap versi 1** — berkas
+    ``state/chapterNN.json`` yang sudah ada tetap sah tanpa migrasi. Saat
+    checkpoint ditulis, field ini dibuang (lihat ``memory.chapter_state``):
+    ``record.draft`` sudah menyimpan draf itu, dan menyimpannya lagi di dalam
+    setiap review akan menggandakan ukuran berkas state hanya untuk
+    menduplikasi isi yang sama.
     """
 
     gate: str
@@ -94,6 +108,7 @@ class ReviewResult(FrozenModel):
     score: int = Field(default=0, ge=0, le=10)
     feedback: tuple[str, ...] = ()
     skipped: bool = False
+    enriched_draft: "ChapterDraft | None" = None
 
 
 class ReviewVerdict(FrozenModel):

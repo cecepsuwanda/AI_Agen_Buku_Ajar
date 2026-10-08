@@ -38,7 +38,10 @@ book:
     contoh, dan diakhiri latihan.
 
 pipeline:
-  # §27 mendefinisikan rantai 10 tahap; hanya gate yang terisi didaftarkan di sini.
+  # Rantai status di build ini berisi 12 tahap: sepuluh dari §27, ditambah dua
+  # tahap penulisan yang blueprint sendiri letakkan sesudah Chapter Writer
+  # (§19 Example Agent, §20 Exercise Agent). Hanya gate yang terisi yang
+  # didaftarkan di sini; sisanya dipegang placeholder di agents/gates.py.
   # Menambah gate baru = daftarkan di agents/gates.py + tambahkan namanya di sini.
   #
   # URUTAN PENTING dan tidak dapat ditukar. `validate_gates` menolak gate yang
@@ -46,7 +49,7 @@ pipeline:
   # gate yang urutannya keliru — gate seperti itu akan dilewati `can_advance`
   # tanpa suara. Urutkan mengikuti rantai: contoh → latihan → fakta → sitasi →
   # pedagogi → konsistensi → reviewer → latex → latex_qa.
-  gates: [reviewer]
+  gates: [example_writer, exercise_writer, reviewer]
 
 # -----------------------------------------------------------------------------
 # RAG (§10, §13). Indeks dibangun perintah tersendiri: `ai-book ingest`.

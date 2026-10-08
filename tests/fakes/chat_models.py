@@ -30,12 +30,15 @@ from domain.structured import example_instance
 #: Nilai yang dipakai untuk field dengan nama tertentu, apa pun tipenya.
 #:
 #: Berguna untuk mengarahkan skenario: reviewer yang menyetujui bab memerlukan
-#: ``approved=True``, dan itu tidak dapat ditebak dari skema.
+#: ``approved=True``, dan itu tidak dapat ditebak dari skema. Hal yang sama
+#: berlaku untuk ``difficulty`` — skema hanya menyatakan ``string``, sedangkan
+#: nilai yang sah bagi gate §20 adalah salah satu dari ``DIFFICULTY_LEVELS``.
 DEFAULT_OVERRIDES: Mapping[str, Any] = {
     "approved": True,
     "score": 9,
     "skipped": False,
     "error": None,
+    "difficulty": "mudah",
 }
 
 

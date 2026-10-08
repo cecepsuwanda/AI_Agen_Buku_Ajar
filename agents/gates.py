@@ -1,11 +1,11 @@
 """Registri gate pipeline (§27) — jembatan antara rantai 10 tahap dan MVP.
 
-Blueprint §27 mendefinisikan rantai sepuluh status, sedangkan MVP ini hanya
-punya empat agent. Rantai itu tidak boleh diciutkan agar cocok dengan MVP —
-status yang dihapus hari ini harus dimigrasikan di seluruh ``state/*.json``
-besok. Karena itu rantai tetap utuh, dan tahap yang belum berpenghuni diisi
-oleh :class:`PassThroughGate`: gate yang tidak memanggil LLM, tidak memeriksa
-apa pun, dan **mencatat dirinya sebagai dilewati**.
+Blueprint §27 mendefinisikan rantai sepuluh status, sedangkan build ini baru
+mengisi sebagiannya. Rantai itu tidak boleh diciutkan agar cocok dengan apa
+yang sudah ada — status yang dihapus hari ini harus dimigrasikan di seluruh
+``state/*.json`` besok. Karena itu rantai tetap utuh, dan tahap yang belum
+berpenghuni diisi oleh :class:`PassThroughGate`: gate yang tidak memanggil LLM,
+tidak memeriksa apa pun, dan **mencatat dirinya sebagai dilewati**.
 
 Itulah yang membuat ``BookDirector`` tidak perlu tahu gate mana yang ada. Ia
 mengulang daftar dari ``config.yaml`` dan memanggil ``evaluate`` pada setiap

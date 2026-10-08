@@ -22,7 +22,8 @@ import pytest
 
 from app.container import FixedClock
 from domain.book import BookRequest, BookSpec, ChapterSpec
-from domain.chapter import ChapterDraft, ChapterRecord
+from domain.chapter import ChapterDraft, ChapterRecord, ReviewResult
+from domain.enums import ChapterStatus
 from domain.errors import StateCorruptError, StateWriteError
 from domain.state import BookState
 from memory.chapter_state import (
@@ -335,6 +336,82 @@ def test_the_raw_text_is_preserved_verbatim(store: JsonStateStore) -> None:
     path = Path(store.save_raw_failure(1, 2, payload))
 
     assert payload in path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# 6. Penyisipan status baru tidak memaksa migrasi (§19, §20)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("status", ["DRAFTED", "APPROVED"])
+def test_a_state_file_written_before_the_new_stages_still_decodes(status: str) -> None:
+    """Berkas ``state/chapterNN.json`` dari build lama tetap sah tanpa disentuh.
+
+    ``ChapterStatus`` adalah ``StrEnum``, dan kedua status baru disisipkan
+    **sesudah** ``DRAFTED`` — sehingga nilai yang sudah tertulis di disk tetap
+    ter-decode. Bila suatu hari penyisipan itu menuntut migrasi, tes ini yang
+    akan menolaknya lebih dulu.
+    """
+    legacy = {
+        "schema_version": 1,
+        "number": 1,
+        "status": status,
+        "spec": SPEC.model_dump(mode="json"),
+        "draft": {"title": "Pengantar"},
+    }
+
+    record = decode_chapter(legacy, source="chapter01.json")
+
+    assert record.status is ChapterStatus(status)
+    assert record.number == 1
+
+
+def test_a_record_without_the_new_field_is_still_valid() -> None:
+    """``enriched_draft`` punya bawaan ``None`` — berkas lama tidak memuatnya."""
+    review = ReviewResult.model_validate({"gate": "reviewer", "approved": True, "score": 9})
+
+    assert review.enriched_draft is None
+
+
+def test_an_enriched_draft_is_not_written_into_every_review() -> None:
+    """Draf itu sudah disimpan sekali di ``record.draft``; menyimpannya lagi menggandakan berkas.
+
+    ``state/chapterNN.json`` yang dua kali lebih besar hanya untuk menduplikasi
+    isi yang sama adalah biaya yang dibayar setiap kali bab dibaca dan ditulis.
+    Review yang tersimpan mencatat **vonis**, bukan isi draf.
+    """
+    enriched = ChapterDraft(title="Pengantar", examples=("Contoh dari gate.",))
+    review = ReviewResult(
+        gate="example_writer", approved=True, score=10, enriched_draft=enriched
+    )
+    record = _record(status="EXAMPLES_WRITTEN", draft=enriched, reviews=(review,))
+
+    payload = encode_chapter(record)
+
+    assert "enriched_draft" not in json.dumps(payload, ensure_ascii=False)
+    assert payload["draft"]["examples"] == ["Contoh dari gate."]
+
+
+def test_the_enriched_draft_survives_resume_without_being_duplicated(
+    store: JsonStateStore,
+) -> None:
+    """Yang penting bukan field-nya, melainkan **drafnya tetap ada setelah resume**.
+
+    Membuang ``enriched_draft`` dari review hanya aman karena gate penulisan
+    menyerahkannya tepat supaya ia menjadi ``record.draft``. Tes ini membuktikan
+    keduanya sekaligus: berkasnya tidak menggandakan isi, dan draf yang diperkaya
+    itu benar-benar kembali saat bab dimuat lagi.
+    """
+    enriched = ChapterDraft(title="Pengantar", examples=("Contoh dari gate.",))
+    review = ReviewResult(
+        gate="example_writer", approved=True, score=10, enriched_draft=enriched
+    )
+    store.save_chapter(_record(status="EXAMPLES_WRITTEN", draft=enriched, reviews=(review,)))
+
+    loaded = store.load_chapter(1)
+
+    assert loaded is not None
+    assert loaded.draft == enriched
+    assert loaded.reviews[0].enriched_draft is None
+    assert "enriched_draft" not in store.chapter_path(1).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

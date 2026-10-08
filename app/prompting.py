@@ -35,6 +35,7 @@ from pydantic import BaseModel
 from domain.book import BookSpec, ChapterSpec
 from domain.chapter import ChapterDraft, ReviewVerdict
 from domain.errors import ConfigError
+from domain.examples import ExampleSet, ExerciseSet
 from domain.ports import RenderedPrompt
 from domain.structured import render_output_contract
 
@@ -49,6 +50,8 @@ OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "planner.ChapterSpec": ChapterSpec,
     "writer.ChapterDraft": ChapterDraft,
     "reviewer.ReviewVerdict": ReviewVerdict,
+    "example.ExampleSet": ExampleSet,
+    "exercise.ExerciseSet": ExerciseSet,
 }
 
 #: Kunci front-matter yang wajib ada di setiap berkas prompt.

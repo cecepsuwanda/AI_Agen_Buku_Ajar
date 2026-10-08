@@ -229,14 +229,22 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
 
     # Rantai peran yang benar-benar dipanggil, berurutan. Seluruh jalur berperan
     # hadir di sini — dan itulah gunanya: ``--dry-run`` adalah satu-satunya cara
-    # membuktikan keempat agent benar-benar dipanggil, tanpa jaringan dan tanpa
+    # membuktikan setiap agent benar-benar dipanggil, tanpa jaringan dan tanpa
     # menghitung panggilan model.
+    #
+    # ``04-code`` dan ``05-writer`` adalah dua tahap penulisan §19/§20 yang
+    # berjalan SESUDAH penulis draf. Peran ``code`` dipakai Example Agent karena
+    # contoh butuh ketepatan sintaks; peran ``writer`` dipakai Exercise Agent
+    # karena latihan adalah prosa. Nomor berkasnyalah yang membuktikan keduanya
+    # berada di antara penulis dan peninjau — bukan sebelum, bukan sesudah.
     prompts = _dry_run_prompts(layout)
     assert set(prompts) == {
         "01-planner.txt",
         "02-chapter_planner.txt",
         "03-writer.txt",
-        "04-reviewer.txt",
+        "04-code.txt",
+        "05-writer.txt",
+        "06-reviewer.txt",
     }
 
     # Setiap prompt memuat system, user, skema format= mentah, dan model+opsi
@@ -266,6 +274,7 @@ def test_dry_run_covers_the_whole_pipeline_without_a_socket(
 
     markdown = _sandbox_markdown(layout)
     assert markdown.startswith("# Bab 1.")
+    assert "## Contoh" in markdown
     assert "## Latihan" in markdown
 
 
@@ -371,9 +380,12 @@ def test_dry_run_on_a_planned_book_mirrors_the_plan_read_only(
 
     # Rencana tidak pernah disusun ulang: ia dibaca dari salinan, bukan dari model.
     # Perencana **buku** karena itu tidak dipanggil — tetapi perincian per bab tetap
-    # dikerjakan, sebab ia bekerja pada bab, bukan pada buku (§16).
+    # dikerjakan, sebab ia bekerja pada bab, bukan pada buku (§16), dan tahap
+    # contoh (§19) serta latihan (§20) ikut berjalan karena keduanya bekerja
+    # pada bab juga.
     assert {_role_of(name) for name in _dry_run_prompts(layout)} == {
         "chapter_planner",
+        "code",
         "writer",
         "reviewer",
     }

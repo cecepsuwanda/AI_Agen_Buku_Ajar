@@ -89,13 +89,27 @@ def _common_book_args() -> dict[str, Any]:
 def prompt_contexts(
     empty_research: ResearchPackage,
 ) -> dict[str, dict[str, Any]]:
-    """Konteks render untuk kelima prompt, memakai cabang riset kosong.
+    """Konteks render untuk setiap prompt, memakai cabang riset kosong.
 
     Dikembalikan sebagai peta ``nama prompt -> konteks`` supaya tes dapat
     mengulanginya tanpa menyalin-tempel argumen.
     """
     common = _common_book_args()
     return {
+        "example.chapter": {
+            **common,
+            "required_examples": 3,
+            "draft_json": '{"title": "Analisis Kompleksitas"}',
+            "research": empty_research,
+            "feedback": (),
+        },
+        "exercise.chapter": {
+            **common,
+            "required_exercises": 5,
+            "draft_json": '{"title": "Analisis Kompleksitas"}',
+            "research": empty_research,
+            "feedback": ("2 latihan tidak menyebut satu pun tujuan bab.",),
+        },
         "planner.book": {
             "title": "Algoritma dan Struktur Data",
             "audience": "mahasiswa S1",

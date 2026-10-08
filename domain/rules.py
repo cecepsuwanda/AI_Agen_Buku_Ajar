@@ -94,18 +94,29 @@ def with_gate_result(
     Gate lulus → status naik ke ``produces``; gate gagal → ``FAILED_REVIEW``
     dan penghitung revisi bertambah.
 
+    Bila vonis itu membawa ``enriched_draft``, draf record **diganti** lebih
+    dulu. Inilah cara gate penulisan (§19 Example Agent, §20 Exercise Agent)
+    menyerahkan hasil kerjanya tanpa ``BookDirector`` perlu tahu apa pun tentang
+    mereka: ia hanya melihat "sebuah gate lulus", dan drafnya sudah berubah.
+
+    Penggantian draf hanya berlaku pada vonis yang **lulus**. Gate yang menolak
+    tidak boleh menyisipkan drafnya sendiri: bab itu sedang menuju revisi, dan
+    draf hasil kerja gate yang ditolak akan menjadi "draf terakhir" yang justru
+    tidak pernah disetujui siapa pun.
+
     :raises InvalidGateError: bila ``produces`` bukan kemajuan yang sah.
     """
     if result.approved:
         if not can_advance(record.status, produces):
             raise InvalidGateError(result.gate, record.status, produces)
-        return record.model_copy(
-            update={
-                "status": produces,
-                "reviews": (*record.reviews, result),
-                "error": None,
-            }
-        )
+        update: dict[str, object] = {
+            "status": produces,
+            "reviews": (*record.reviews, result),
+            "error": None,
+        }
+        if result.enriched_draft is not None:
+            update["draft"] = result.enriched_draft
+        return record.model_copy(update=update)
 
     return record.model_copy(
         update={

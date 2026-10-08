@@ -16,8 +16,9 @@ class ChapterStatus(StrEnum):
 
     Alur bahagia §27::
 
-        PLANNED → RESEARCHED → DRAFTED → FACT_CHECKED → CITATION_CHECKED
-                → PEDAGOGY_REVIEWED → CONSISTENCY_CHECKED
+        PLANNED → RESEARCHED → DRAFTED → EXAMPLES_WRITTEN → EXERCISES_WRITTEN
+                → FACT_CHECKED → CITATION_CHECKED → PEDAGOGY_REVIEWED
+                → CONSISTENCY_CHECKED → REVIEWED
                 → LATEX_GENERATED → LATEX_COMPILED → APPROVED
 
     MVP hanya mengisi sebagian tahap. Status yang belum berpenghuni dilewati
@@ -29,6 +30,12 @@ class ChapterStatus(StrEnum):
     PLANNED = "PLANNED"
     RESEARCHED = "RESEARCHED"
     DRAFTED = "DRAFTED"
+    # §19/§20 menaruh Example Agent dan Exercise Agent SESUDAH Chapter Writer,
+    # jadi keduanya adalah tahap penulisan — bukan bagian pemeriksaan di bawah.
+    # Urutan keduanya mengikuti blueprint: contoh lebih dulu, latihan kemudian,
+    # karena latihan yang baik sering merujuk contoh yang baru saja diberikan.
+    EXAMPLES_WRITTEN = "EXAMPLES_WRITTEN"
+    EXERCISES_WRITTEN = "EXERCISES_WRITTEN"
 
     # --- Tahap pemeriksaan kualitas (§21–§24, §26) -------------------------
     FACT_CHECKED = "FACT_CHECKED"

@@ -87,8 +87,23 @@ def encode_chapter(record: ChapterRecord) -> dict[str, Any]:
     ``mode="json"`` dipakai supaya ``StrEnum`` dan tipe lain yang bukan JSON
     asli ditulis sebagai nilainya, bukan sebagai repr Python — berkas state
     harus dapat dibaca alat lain, bukan hanya oleh Pydantic.
+
+    Draf pada ``ReviewResult.enriched_draft`` **dibuang** sebelum penulisan.
+    ``record.draft`` sudah menyimpan draf yang sama — gate penulisan
+    menyerahkannya tepat supaya ia menjadi draf berjalan — jadi menyimpannya
+    lagi di dalam tiap review akan menyalin seluruh isi bab sekali per gate
+    yang memperkayanya. Berkas state yang menggelembung dua kali lipat bukan
+    masalah ruang, melainkan masalah **keterbacaan**: setiap perubahan satu
+    paragraf akan menghasilkan diff sebesar dua bab pada dua tempat berbeda.
+
+    Yang tersimpan di dalam review adalah **vonisnya**, bukan isi drafnya.
+    Draf yang diperkaya tetap ada di ``record.draft``, sehingga resume
+    memulihkannya utuh tanpa perlu membaca ulang review mana pun.
     """
-    return record.model_dump(mode="json")
+    payload = record.model_dump(mode="json")
+    for review in payload.get("reviews", ()):
+        review.pop("enriched_draft", None)
+    return payload
 
 
 def encode_book(state: BookState) -> dict[str, Any]:

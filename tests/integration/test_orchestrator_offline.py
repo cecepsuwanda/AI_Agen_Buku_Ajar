@@ -41,7 +41,7 @@ from agents.writer import ChapterWriter
 from app.container import FixedClock
 from app.prompting import FilePromptLibrary
 from domain.book import BookRequest, BookSpec, ChapterSpec
-from domain.chapter import ChapterDraft, ResearchPackage
+from domain.chapter import ChapterDraft, ChapterRecord, ResearchPackage
 from domain.enums import ChapterStatus
 from domain.errors import (
     AgentOutputError,
@@ -352,6 +352,57 @@ def test_a_second_run_of_a_finished_book_calls_no_model_at_all(
     assert provider.total_calls() == calls_after_first_run
     assert report.approved == 3
     assert reporter.said("Tidak ada bab yang perlu dikerjakan")
+
+
+@pytest.mark.parametrize(
+    "status", [ChapterStatus.EXAMPLES_WRITTEN, ChapterStatus.EXERCISES_WRITTEN]
+)
+def test_resuming_after_a_writing_stage_never_rewrites_the_draft(
+    status: ChapterStatus,
+    prompt_library: FilePromptLibrary,
+    state: JsonStateStore,
+    artifacts: MarkdownArtifacts,
+    reporter: RecordingReporter,
+) -> None:
+    """``DRAFT_READY_STATUSES`` adalah satu-satunya himpunan yang menyebut status per tahap.
+
+    Gate contoh dan latihan **mengganti** draf (§19, §20), jadi bab yang terputus
+    tepat setelah salah satunya sudah memegang draf terbaik yang dimilikinya.
+    Bila statusnya tidak ada di himpunan itu, resume akan menulis ulang bab dari
+    nol: draf yang sudah diperkaya dibuang, dan satu panggilan writer penuh
+    dibayar untuk menghasilkan draf yang berbeda.
+
+    Penulis di sini sengaja diberi skrip kosong — setiap panggilan akan
+    menggagalkan tes dengan pesan yang jelas, bukan diam-diam menulis ulang.
+    """
+    spec = seed_book(state, chapters=1)
+    state.save_chapter(
+        ChapterRecord(
+            number=1,
+            status=status,
+            spec=spec.chapters[0],
+            draft=ChapterDraft(title="Bab 1", summary="draf yang sudah diperkaya"),
+            research=ResearchPackage.empty(),
+        )
+    )
+    writer = ScriptedChatModel([])
+    director, _ = build_director(
+        prompts=prompt_library,
+        state=state,
+        artifacts=artifacts,
+        reporter=reporter,
+        writer_model=writer,
+    )
+
+    report = director.run()
+
+    assert writer.call_count == 0, "draf yang sudah siap tidak ditulis ulang"
+    assert report.approved == 1
+    resumed = state.load_chapter(1)
+    assert resumed is not None
+    assert resumed.status is ChapterStatus.APPROVED
+    assert resumed.draft is not None
+    assert resumed.draft.summary == "draf yang sudah diperkaya"
 
 
 def test_a_missing_markdown_file_is_rerendered_from_the_record(

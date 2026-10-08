@@ -43,6 +43,8 @@ EXPECTED: dict[tuple[ChapterStatus, ChapterEvent], ChapterStatus] = {
     (ChapterStatus.RESEARCHED, ChapterEvent.DRAFT): ChapterStatus.DRAFTED,
     (ChapterStatus.REVISION, ChapterEvent.DRAFT): ChapterStatus.DRAFTED,
     (ChapterStatus.DRAFTED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.EXAMPLES_WRITTEN, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.EXERCISES_WRITTEN, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.FACT_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.CITATION_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.PEDAGOGY_REVIEWED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
@@ -51,6 +53,25 @@ EXPECTED: dict[tuple[ChapterStatus, ChapterEvent], ChapterStatus] = {
     (ChapterStatus.REVIEWED, ChapterEvent.APPROVE): ChapterStatus.APPROVED,
     (ChapterStatus.LATEX_COMPILED, ChapterEvent.APPROVE): ChapterStatus.APPROVED,
 }
+
+#: Rantai §27 **sebelum** dua tahap penulisan §19/§20 disisipkan.
+#:
+#: Ditulis sebagai literal dengan sengaja: ia adalah bentuk lama yang harus
+#: tetap bermakna, karena berkas ``state/chapterNN.json`` yang sudah ada di
+#: disk memuat status-status ini dan tidak ada yang akan memigrasikannya.
+_LEGACY_CHAIN: tuple[ChapterStatus, ...] = (
+    ChapterStatus.PLANNED,
+    ChapterStatus.RESEARCHED,
+    ChapterStatus.DRAFTED,
+    ChapterStatus.FACT_CHECKED,
+    ChapterStatus.CITATION_CHECKED,
+    ChapterStatus.PEDAGOGY_REVIEWED,
+    ChapterStatus.CONSISTENCY_CHECKED,
+    ChapterStatus.REVIEWED,
+    ChapterStatus.LATEX_GENERATED,
+    ChapterStatus.LATEX_COMPILED,
+    ChapterStatus.APPROVED,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +177,8 @@ def test_the_chain_is_the_documented_order() -> None:
     for status in (
         ChapterStatus.RESEARCHED,
         ChapterStatus.DRAFTED,
+        ChapterStatus.EXAMPLES_WRITTEN,
+        ChapterStatus.EXERCISES_WRITTEN,
         ChapterStatus.FACT_CHECKED,
         ChapterStatus.CITATION_CHECKED,
         ChapterStatus.PEDAGOGY_REVIEWED,
@@ -164,6 +187,26 @@ def test_the_chain_is_the_documented_order() -> None:
         ChapterStatus.LATEX_COMPILED,
     ):
         assert status in CHAIN, status
+
+
+def test_inserting_new_stages_preserves_the_relative_order_of_every_old_pair() -> None:
+    """Penyisipan tahap §19/§20 tidak mengubah arti satu pun pasangan status lama.
+
+    Inilah yang membuat state yang sudah ada tetap sah **tanpa migrasi**.
+    ``can_advance`` membandingkan **posisi relatif** dua status di rantai — bukan
+    jaraknya — jadi menyisipkan status baru di antaranya aman hanya bila urutan
+    relatif seluruh pasangan lama tetap sama. Gate yang dulu boleh melompat
+    ``DRAFTED → REVIEWED`` harus tetap boleh; gate yang dulu ditolak
+    ``REVIEWED → DRAFTED`` harus tetap ditolak. Bila tidak, gate yang sudah
+    terdaftar di ``config.yaml`` seseorang akan diam-diam berhenti dijalankan.
+    """
+    missing = [status for status in _LEGACY_CHAIN if status not in CHAIN]
+    assert not missing, f"status yang pernah tertulis ke state hilang dari rantai: {missing}"
+
+    for source in _LEGACY_CHAIN:
+        for target in _LEGACY_CHAIN:
+            before = _LEGACY_CHAIN.index(target) > _LEGACY_CHAIN.index(source)
+            assert can_advance(source, target) is before, f"{source} -> {target}"
 
 
 def test_advancing_follows_the_chain() -> None:
@@ -184,10 +227,10 @@ def test_statuses_outside_the_chain_can_never_be_advanced_to() -> None:
 
 
 def test_a_gate_may_skip_forward_over_uninhabited_stages() -> None:
-    """Gate boleh melompat maju — itulah yang membuat MVP 4-agent tetap sah.
+    """Gate boleh melompat maju — itulah yang membuat MVP tetap sah.
 
     Peninjau MVP memindahkan ``DRAFTED`` langsung ke ``REVIEWED``, melewati
-    enam tahap yang belum berpenghuni. Rantai 10-tahap tetap utuh, dan gate
+    seluruh tahap yang belum berpenghuni. Rantai 12-tahap tetap utuh, dan gate
     yang menyusul nanti cukup mengambil posisi yang sudah disediakan.
     """
     produced = status_after_gate(ChapterStatus.DRAFTED, ChapterStatus.REVIEWED, gate="reviewer")

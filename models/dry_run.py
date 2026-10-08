@@ -43,11 +43,20 @@ FILE_TEMPLATE = "{index:02d}-{role}.txt"
 #: ``--dry-run`` yang berhenti di revisi hanya akan menulis prompt peninjau satu
 #: kali, padahal yang ingin dilihat orang adalah seluruh prompt yang mungkin
 #: dikirim. Untuk melihat jalur revisi, timpa ``approved`` menjadi ``False``.
+#:
+#: ``difficulty`` ada di sini karena alasan yang sama seperti ``approved``:
+#: nilainya **tidak dapat ditebak dari skema**. Skema hanya menyatakan
+#: ``string``, dan sintesis yang menuliskan nama field-nya sendiri ("difficulty")
+#: menghasilkan label yang tidak sah menurut ``DIFFICULTY_LEVELS`` — sehingga
+#: gate latihan (§20) akan meminta perbaikan berulang atas kekurangan yang
+#: dibuat oleh penyintesis, bukan oleh pipeline. Nilai yang sah tidak dapat
+#: disimpulkan dari tipe, jadi ia harus dinyatakan.
 DEFAULT_OVERRIDES: Mapping[str, Any] = {
     "approved": True,
     "score": 9,
     "skipped": False,
     "error": None,
+    "difficulty": "mudah",
 }
 
 

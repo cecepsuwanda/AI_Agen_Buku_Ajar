@@ -364,3 +364,53 @@ def test_a_refused_gate_is_not_a_guard_against_the_honest_path() -> None:
 
     assert advanced.status is ChapterStatus.REVIEWED
     assert validate_gates((_Gate("reviewer", ChapterStatus.REVIEWED),)) is None
+
+
+# ---------------------------------------------------------------------------
+# enriched_draft — gate boleh memperkaya draf, bukan hanya menilainya (§19, §20)
+# ---------------------------------------------------------------------------
+def test_an_approved_gate_replaces_the_draft_it_enriched() -> None:
+    """Inilah cara gate penulisan menyerahkan hasil kerjanya.
+
+    ``BookDirector`` tidak tahu apa pun tentang Example atau Exercise Agent:
+    baginya ini hanyalah "gate yang lulus", dan drafnya sudah berubah.
+    """
+    enriched = DRAFT.model_copy(update={"examples": ("Contoh dari gate.",)})
+    record = make_record(1, ChapterStatus.DRAFTED, research=RESEARCH, draft=DRAFT)
+    verdict = ReviewResult(
+        gate="example_writer", approved=True, score=10, enriched_draft=enriched
+    )
+
+    advanced = with_gate_result(record, verdict, produces=ChapterStatus.EXAMPLES_WRITTEN)
+
+    assert advanced.status is ChapterStatus.EXAMPLES_WRITTEN
+    assert advanced.draft == enriched
+
+
+def test_a_gate_that_only_judges_leaves_the_draft_untouched() -> None:
+    """Peninjau tidak mengubah draf; field dengan bawaan ``None`` menjaganya begitu."""
+    record = make_record(1, ChapterStatus.DRAFTED, research=RESEARCH, draft=DRAFT)
+    verdict = ReviewResult(gate="reviewer", approved=True, score=9)
+
+    advanced = with_gate_result(record, verdict, produces=ChapterStatus.REVIEWED)
+
+    assert advanced.draft == DRAFT
+
+
+def test_a_rejecting_gate_cannot_install_its_own_draft() -> None:
+    """Penolakan berarti "kerjakan ulang" — memasang draf versi gate menutupi itu.
+
+    Bab itu sedang menuju revisi. Draf hasil kerja gate yang ditolak akan menjadi
+    "draf terakhir" yang justru tidak pernah disetujui siapa pun.
+    """
+    enriched = DRAFT.model_copy(update={"examples": ("Contoh dari gate.",)})
+    record = make_record(1, ChapterStatus.DRAFTED, research=RESEARCH, draft=DRAFT)
+    verdict = ReviewResult(
+        gate="pedagogy", approved=False, score=3, enriched_draft=enriched
+    )
+
+    rejected = with_gate_result(record, verdict, produces=ChapterStatus.PEDAGOGY_REVIEWED)
+
+    assert rejected.status is ChapterStatus.FAILED_REVIEW
+    assert rejected.draft == DRAFT
+    assert rejected.revision == 1
