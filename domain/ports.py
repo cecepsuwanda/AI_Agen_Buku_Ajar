@@ -21,6 +21,7 @@ from domain.book import ChapterSpec
 from domain.chapter import ChapterRecord, Evidence, ResearchPackage, ReviewResult
 from domain.document import Document
 from domain.enums import ChapterStatus
+from domain.latex import LatexBuildResult
 from domain.state import BookState
 
 
@@ -229,12 +230,14 @@ class LatexArtifacts(Protocol):
     tanpa Markdown bukan apa-apa. Menyatukannya berarti setiap pembaca Markdown
     ikut menanggung direktori LaTeX yang mungkin tidak ada.
 
-    Port ini **tidak** memuat langkah kompilasi. Bab yang ditulis di sini adalah
-    potongan ``\\include`` — ia tidak berdiri sendiri, sehingga mengompilasinya
-    per bab tidak mungkin, dan kompilasi sungguhannya adalah pekerjaan
-    **tingkat buku** yang dijalankan perintah ``export`` beserta pemeriksaannya
-    di §26 (Tahap 7). Port yang menyediakan ``compile()`` tanpa satu pun
-    pemanggil produksi hanya akan menjadi kode mati yang harus diuji.
+    Port ini **tidak** memuat langkah kompilasi, meski §26 memang mengompilasi.
+    Bab yang ditulis di sini adalah potongan ``\\include`` — ia tidak berdiri
+    sendiri, sehingga mengompilasi satu bab tidak mungkin dengan ``main.tex``
+    buku; yang dilakukan gate §26 adalah mengompilasinya di dalam dokumen sekali
+    pakai, dan itu pekerjaan :class:`LatexCompiler` yang terpisah. Pemisahan itu
+    bukan kerapian: penulisan berkas dan pemanggilan ``subprocess`` adalah dua
+    izin yang berbeda, dan gate yang hanya ingin memeriksa tidak perlu memegang
+    yang pertama.
 
     Karena itu gate §25 adalah satu-satunya gate yang **menulis berkas**, dan itu
     disengaja: menulis ``.tex`` adalah pekerjaan batas sistem, dan alternatifnya
@@ -246,6 +249,23 @@ class LatexArtifacts(Protocol):
         """Tulis potongan LaTeX satu bab. Kembalikan jalurnya."""
         ...
 
+    def load_chapter(self, number: int) -> str | None:
+        """Baca kembali potongan LaTeX bab ``number``; ``None`` bila belum ada.
+
+        Satu-satunya method yang membaca di port ini, dan ia ada karena satu
+        alasan yang tidak berlaku bagi Markdown: potongan LaTeX **tidak dapat
+        dirender ulang dengan murah**. Perender
+        :func:`~domain.latex.render_chapter_latex` memang murni, tetapi masukannya
+        adalah :class:`~domain.latex.LatexChapter` yang dihasilkan model — dan
+        memintanya sekali lagi berarti membayar satu panggilan LLM untuk
+        memperoleh kembali berkas yang sudah ada di disk.
+
+        Yang membacanya adalah gate §26: ia mengompilasi **persis** yang ditulis
+        :class:`~agents.latex_writer.LatexWriterGate`, bukan bab yang dihasilkan
+        ulang dengan cara yang mungkin berbeda.
+        """
+        ...
+
     def save_bibliography(self, text: str) -> str:
         """Tulis daftar pustaka (``references.bib``). Kembalikan jalurnya.
 
@@ -253,6 +273,48 @@ class LatexArtifacts(Protocol):
         daftar pustaka hanya bertambah, dan bab pertama yang sudah menulisnya
         membuat setiap bab berikutnya tidak perlu menunggu perintah terakhir
         untuk dapat dikompilasi.
+        """
+        ...
+
+
+class LatexCompiler(Protocol):
+    """Kompilasi satu potongan bab dengan perkakas LaTeX (§26).
+
+    Port ini **sempit dengan sengaja**: satu method, dan masukannya teks. Yang
+    dipakainya adalah gate §26, yang perlu tahu "apakah potongan ini benar-benar
+    dapat dikompilasi" — bukan "bagaimana buku ini dirakit". Merakit buku
+    (``main.tex``, seluruh bab, daftar pustaka) adalah pekerjaan perintah
+    ``export --latex``, dan perintah itu tinggal di ``app/``, yang bebas
+    memanggil adapter konkretnya langsung.
+
+    Karena itu tidak ada ``compile_book`` di sini. Port yang memuat dua method
+    untuk dua pemanggil yang berbeda adalah port yang memaksa setiap pemakainya
+    menanggung yang tidak dipakainya (ISP) — dan yang paling merugikan adalah
+    tesnya: setiap fake compiler harus mengimplementasikan keduanya.
+
+    Adapter-nya **tidak melempar** untuk kegagalan kompilasi. Kompilasi yang
+    gagal adalah hasil yang diharapkan (§35), bukan kesalahan: ia dikembalikan
+    sebagai :class:`~domain.latex.LatexBuildResult` yang memuat log-nya, dan
+    :func:`~domain.latex.build_problems` yang memutuskan apa artinya.
+    """
+
+    def compile_fragment(
+        self,
+        fragment: str,
+        *,
+        sources: Sequence[str] = (),
+    ) -> LatexBuildResult:
+        """Kompilasi satu potongan bab dalam dokumen sekali pakai.
+
+        :param fragment: potongan LaTeX seperti yang ditulis
+            ``latex/artifacts.py`` — ``\\chapter``, label, isi. Adapter yang
+            membungkusnya dengan preamble buku, karena preamble adalah
+            pengetahuan yang hanya boleh ada di satu tempat
+            (``latex/templates/preamble.tex``).
+        :param sources: nama sumber yang ditulis menjadi ``references.bib`` di
+            direktori kerja, lewat :func:`~domain.latex.render_bibliography`.
+            Tanpa entri ini, setiap ``\\cite`` dilaporkan menggantung meski
+            kuncinya benar.
         """
         ...
 

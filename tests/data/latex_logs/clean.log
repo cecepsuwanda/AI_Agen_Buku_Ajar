@@ -1,0 +1,15 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex)
+entering extended mode
+(probe.tex
+LaTeX2e <2023-11-01>
+(/path/preamble.tex)
+No file probe.aux.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 4.
+(./chapters/chapter01.tex
+Chapter 1.
+[1{/path/fonts/.../cmr10.pfb}]
+)
+(./probe.aux)
+(./probe.bbl) [2] (./probe.aux)
+Output written on probe.pdf (2 pages, 41234 bytes).
+Transcript written on probe.log.

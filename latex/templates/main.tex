@@ -10,8 +10,8 @@
 % Perintah `export --latex` menyalin berkas ini ke `output/latex/` lalu:
 %   * mengganti baris \title dan \author di bawah dengan judul buku yang
 %     sesungguhnya, dan
-%   * mengisi blok \include dengan bab-bab yang sudah mencapai status
-%     LATEX_COMPILED, satu baris per bab, berurutan.
+%   * mengisi blok di antara kedua penanda BUKUAJAR-BAB-* dengan bab-bab yang
+%     sudah mencapai status LATEX_COMPILED, satu baris per bab, berurutan.
 %
 % Berkas ini dapat ditimpa pengguna lewat `input/source_latex/main.tex`
 % (argumen `--latex-template`, §42): prodi yang punya template sendiri hanya
@@ -33,10 +33,17 @@
 
 \mainmatter
 
-% --- bab-bab: diisi `export --latex`, jangan disunting tangan ---------------
+% BUKUAJAR-BAB-MULAI — jangan disunting tangan.
+% `export --latex` mengganti SELURUH isi blok ini (antara baris penanda ini dan
+% baris BUKUAJAR-BAB-SELESAI di bawahnya) dengan satu baris
+% \include{chapters/chapterNN} per bab yang sudah mencapai LATEX_COMPILED.
+% Kedua baris penanda itu yang dicari `domain.latex.render_main_tex`; template
+% yang menghapusnya ditolak dengan pesan yang menyebut penandanya, bukan
+% menghasilkan buku tanpa satu pun bab.
 % \include{chapters/chapter01}
 % \include{chapters/chapter02}
-% ---------------------------------------------------------------------------
+
+% BUKUAJAR-BAB-SELESAI
 
 \backmatter
 

@@ -25,6 +25,7 @@ from domain.errors import IllegalTransitionError, InvalidGateError
 from domain.transitions import (
     CHAIN,
     can_advance,
+    has_reached,
     status_after_gate,
     transition,
 )
@@ -254,3 +255,42 @@ def test_a_gate_cannot_produce_a_status_outside_the_chain() -> None:
     """Gate tidak boleh menghasilkan ``FAILED``; kegagalan punya jalurnya sendiri."""
     with pytest.raises(InvalidGateError):
         status_after_gate(ChapterStatus.DRAFTED, ChapterStatus.FAILED, gate="x")
+
+
+# ---------------------------------------------------------------------------
+# has_reached — "sudah sampai mana", bukan "boleh bergerak ke mana"
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("status", ALL_STATUSES)
+def test_every_status_has_reached_itself(status: ChapterStatus) -> None:
+    """Batasnya inklusif: bab yang **di** sebuah tahap sudah sampai tahap itu.
+
+    Kecuali bab yang tidak ada di rantai sama sekali — ``FAILED`` tidak pernah
+    "sudah sampai" mana pun, termasuk dirinya sendiri.
+    """
+    assert has_reached(status, status) is (status in CHAIN)
+
+
+def test_a_later_milestone_is_reached_by_everything_before_it() -> None:
+    assert has_reached(ChapterStatus.APPROVED, ChapterStatus.LATEX_COMPILED) is True
+    assert has_reached(ChapterStatus.LATEX_COMPILED, ChapterStatus.LATEX_COMPILED) is True
+
+
+def test_an_earlier_status_has_not_reached_a_later_milestone() -> None:
+    assert has_reached(ChapterStatus.DRAFTED, ChapterStatus.LATEX_COMPILED) is False
+
+
+def test_a_failed_chapter_has_reached_nothing() -> None:
+    """Inilah bedanya dari ``not can_advance`` — dan bedanya bukan hiasan.
+
+    ``FAILED`` tidak dapat bergerak ke mana pun, jadi ``can_advance`` bernilai
+    salah untuknya; kebalikannya akan menyatakan bab yang gagal sebagai bab yang
+    sudah selesai dikompilasi, dan seluruh buku akan dirakit dengan bab yang
+    tidak pernah ditulis.
+    """
+    for outsider in (ChapterStatus.REVISION, ChapterStatus.FAILED_REVIEW, ChapterStatus.FAILED):
+        assert can_advance(outsider, ChapterStatus.LATEX_COMPILED) is False
+        assert has_reached(outsider, ChapterStatus.LATEX_COMPILED) is False
+
+
+def test_a_milestone_outside_the_chain_is_never_reached() -> None:
+    assert has_reached(ChapterStatus.APPROVED, ChapterStatus.FAILED) is False

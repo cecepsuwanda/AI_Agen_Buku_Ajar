@@ -17,7 +17,15 @@ sama persis dengan pasangan yang sudah ada untuk Markdown
 
 Seluruh fungsi di sini murni: masuk string, keluar string. Tidak ada berkas,
 tidak ada ``subprocess``, dan tidak ada ``latexmk`` — menulis ``.tex`` adalah
-pekerjaan adapter ``latex/``, dan mengompilasinya baru ada di Tahap 7 (§26).
+pekerjaan adapter ``latex/``, dan mengompilasinya adalah pekerjaan
+``latex/compiler.py`` (§26). Yang tinggal di sini justru keputusan yang memang
+milik program, bukan milik perkakas: menilai apakah hasil kompilasi dapat
+diterima (:func:`build_problems`), memilih bagian log yang berguna untuk
+memperbaiki bab (:func:`log_excerpt`), mencari rujukan silang yang menggantung
+(:func:`crossref_findings`), dan merakit ``main.tex`` dari template
+(:func:`render_main_tex`). Parser log-nya sendiri ada di ``latex/validator.py``
+— ia boleh memakai ``re``, dan ``domain/`` tidak.
+
 Bahkan ``re`` terlarang di ``domain/``, sehingga seluruh pemindaian
 ``\\cite{}``/``\\label{}`` di bawah ditulis dengan ``str.find``. Itu bukan
 kerugian: pemindaian braket yang ditulis tangan jauh lebih jernih daripada
@@ -49,6 +57,7 @@ from pydantic import Field
 
 from domain.base import FrozenModel
 from domain.book import ChapterSpec
+from domain.errors import ConfigError
 from domain.rendering import strip_chapter_prefix
 
 #: Karakter yang bermakna bagi LaTeX, dan penggantinya di dalam **teks biasa**.
@@ -144,6 +153,70 @@ class LatexChapter(FrozenModel):
     )
 
 
+class LatexBuildResult(FrozenModel):
+    """Hasil satu kali kompilasi, sebagaimana dilaporkan LaTeX sendiri (§26).
+
+    Objek ini **hanya memuat fakta**, bukan vonis: ``ok`` berarti perkakas LaTeX
+    melaporkan sukses, dan kedelapan jenis masalah §26 yang terbaca dari log
+    dikelompokkan ke field-nya masing-masing. Yang memutuskan apakah hasil ini
+    dapat diterima adalah :func:`build_problems` — pemisahan itu disengaja,
+    karena "latexmk keluar dengan kode 0" dan "buku ini tidak punya sitasi
+    menggantung" adalah dua hal yang berbeda, dan menyatukannya menjadi satu
+    boolean berarti salah satunya akan hilang.
+
+    ``log_excerpt`` ikut dibawa karena ia satu-satunya hal yang dapat dikerjakan
+    model: potongan log yang menyebut galatnya, bukan dua ratus baris terakhir
+    yang sebagian besar berisi daftar berkas yang dibaca.
+    """
+
+    ok: bool = Field(
+        default=False,
+        description=(
+            "True bila perkakas LaTeX selesai dengan kode keluar 0 dan "
+            "menghasilkan PDF. Bukan vonis akhir — lihat build_problems()."
+        ),
+    )
+    errors: tuple[str, ...] = Field(
+        default=(),
+        description="Baris galat LaTeX (baris log yang dimulai '!'), urut kemunculan.",
+    )
+    warnings: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Peringatan LaTeX yang tidak termasuk jenis lain, tanpa duplikat, "
+            "dipotong pada 10 entri pertama."
+        ),
+    )
+    undefined_refs: tuple[str, ...] = Field(
+        default=(),
+        description="Kunci \\ref yang belum punya \\label, urut kemunculan.",
+    )
+    undefined_citations: tuple[str, ...] = Field(
+        default=(),
+        description="Kunci \\cite yang tidak ditemukan di references.bib.",
+    )
+    duplicate_labels: tuple[str, ...] = Field(
+        default=(),
+        description="Label yang terdefinisi lebih dari sekali di seluruh dokumen.",
+    )
+    missing_figures: tuple[str, ...] = Field(
+        default=(),
+        description="Nama berkas gambar yang dirujuk tetapi tidak ditemukan.",
+    )
+    overfull_boxes: tuple[str, ...] = Field(
+        default=(),
+        description="Kotak yang melebihi lebar halaman (kosmetik, urut kemunculan).",
+    )
+    log_excerpt: str = Field(
+        default="",
+        description="Potongan log yang menyebut galatnya — bahan perbaikan bagi model.",
+    )
+    pdf_path: str = Field(
+        default="",
+        description="Jalur PDF yang dihasilkan; kosong bila kompilasi gagal.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pelolosan & kunci sitasi
 # ---------------------------------------------------------------------------
@@ -204,6 +277,45 @@ def bibliography_entries(sources: Sequence[str]) -> tuple[tuple[str, str], ...]:
             index += 1
         keyed[candidate] = source
     return tuple(sorted(keyed.items()))
+
+
+def bibliography_sources(
+    book_sources: Sequence[str],
+    draft_sources: Sequence[str],
+) -> tuple[str, ...]:
+    """Seluruh sumber yang harus ada di ``references.bib`` satu bab (MURNI).
+
+    Gabungan dua himpunan, dan keduanya diperlukan:
+    ``BookState.citations`` memuat sumber yang sudah lolos pemeriksaan sitasi
+    pada bab-bab sebelumnya — tanpa itu, ``\\cite`` bab ini yang menunjuk sumber
+    dari bab 1 akan menggantung, sedangkan entri buku baru diperbarui *sesudah*
+    bab ini selesai. ``draft.citations`` memuat sumber yang barusan dipakai bab
+    ini.
+
+    Dihitung di ``domain/`` alih-alih di dalam gate karena **dua** gate
+    membutuhkannya: penulis sumber LaTeX (§25) menulis daftar pustakanya, dan
+    pemeriksa kompilasi (§26) memeriksa ``\\cite`` bab terhadap daftar yang sama.
+    Dua salinan aturan ini adalah dua salinan yang akan menyimpang, dan
+    penyimpangannya berbentuk sitasi menggantung yang baru terlihat di PDF.
+    """
+    return tuple(dict.fromkeys((*book_sources, *(source.strip() for source in draft_sources))))
+
+
+def chapter_citations(
+    sources: Sequence[str],
+    draft_sources: Sequence[str],
+) -> tuple[tuple[str, str], ...]:
+    """Pasangan ``(kunci, sumber)`` yang **boleh** dikutip satu bab (MURNI).
+
+    Hanya sumber yang benar-benar dipakai draf — daftar pustaka boleh memuat
+    sumber bab lain, tetapi daftar kunci yang dikirim ke model adalah daftar
+    tertutup untuk bab ini, dan daftar yang lebih pendek lebih mudah dipatuhi.
+    """
+    key_by_source = {source: key for key, source in bibliography_entries(sources)}
+    used = dict.fromkeys(item.strip() for item in draft_sources)
+    return tuple(
+        (key_by_source[source], source) for source in used if source and source in key_by_source
+    )
 
 
 def chapter_latex_filename(number: int) -> str:
@@ -503,6 +615,300 @@ def render_bibliography(sources: Sequence[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Menilai hasil kompilasi (§26)
+# ---------------------------------------------------------------------------
+def build_problems(result: LatexBuildResult) -> tuple[str, ...]:
+    """Temuan yang membuat hasil kompilasi **belum dapat diterima** (MURNI).
+
+    Delapan jenis masalah yang diminta §26 dipetakan ke sini, dan pemetaannya
+    perlu dinyatakan terang karena dua di antaranya bergabung:
+
+    1. galat kompilasi → ``errors``,
+    2. rujukan menggantung (``\\ref`` tanpa ``\\label``) → ``undefined_refs``,
+       **tetapi tidak menahan** — lihat catatan di bawah,
+    3. sitasi menggantung → ``undefined_citations``,
+    4. gambar tidak ditemukan → ``missing_figures``,
+    5. label hilang → sama dengan (2): ``\\ref`` yang tidak menemukan ``\\label``
+       adalah label yang hilang, dibaca dari sisi yang memakainya,
+    6. persamaan rusak → ``errors``; LaTeX melaporkannya sebagai galat
+       (``! Missing $ inserted.``) dan bukan sebagai peringatan,
+    7. kotak melebihi halaman → ``overfull_boxes``, **tidak menahan**,
+    8. label ganda → ``duplicate_labels``.
+
+    **Mengapa rujukan menggantung tidak masuk sini.** Bab dikompilasi sebagai
+    potongan; ``\\ref`` yang menunjuk bab lain akan selalu tampak menggantung di
+    situ meski tidak ada yang salah — dan menolak setiap bab yang merujuk bab
+    sebelumnya berarti tidak ada satu pun buku yang dapat lolos. Yang benar-benar
+    tahu jawabannya adalah kompilasi tingkat buku (``export --latex``), tempat
+    seluruh bab sudah dirakit; di sanalah ``undefined_refs`` dilaporkan sebagai
+    temuan, dan di sana pula ia tidak lagi punya alasan untuk muncul.
+    """
+    problems: list[str] = []
+    if result.errors:
+        problems.append("galat LaTeX: " + "; ".join(result.errors))
+    elif not result.ok:
+        # Perkakas gagal tanpa satu pun baris galat yang terbaca: perkakasnya
+        # tidak ada, atau kehabisan waktu. Dua sebab itu punya pesan sendiri di
+        # adapter, dan di sini yang tersisa hanyalah kenyataan bahwa tidak ada
+        # PDF yang dihasilkan.
+        problems.append("kompilasi tidak menghasilkan PDF")
+    if result.missing_figures:
+        problems.append("berkas gambar tidak ditemukan: " + ", ".join(result.missing_figures))
+    if result.undefined_citations:
+        problems.append(
+            "sitasi yang tidak punya entri daftar pustaka: "
+            + ", ".join(result.undefined_citations)
+        )
+    if result.duplicate_labels:
+        problems.append("label ganda: " + ", ".join(result.duplicate_labels))
+    return tuple(problems)
+
+
+def build_advisories(result: LatexBuildResult) -> tuple[str, ...]:
+    """Temuan yang **dilaporkan tetapi tidak menahan** bab (MURNI).
+
+    Dipisah dari :func:`build_problems` karena keduanya masuk ke tempat yang
+    berbeda: temuan menahan bab dan menggerakkan tangga perbaikan, sedangkan
+    catatan hanya menemani vonis supaya manusia yang membaca
+    ``state/chapterNN.json`` tahu apa yang belum rapi. Menaruh keduanya di satu
+    daftar berarti kotak yang terlalu lebar akan memicu perbaikan yang tidak akan
+    pernah memperbaikinya.
+    """
+    advisories: list[str] = []
+    if result.undefined_refs:
+        advisories.append(
+            "rujukan \\ref yang belum terdefinisi pada bab ini (dapat terisi setelah "
+            "seluruh bab dirakit): " + ", ".join(result.undefined_refs)
+        )
+    if result.overfull_boxes:
+        advisories.append(
+            f"{len(result.overfull_boxes)} kotak melebihi lebar halaman; "
+            "kosmetik, tidak menahan bab"
+        )
+    advisories.extend(f"peringatan LaTeX: {warning}" for warning in result.warnings)
+    return tuple(advisories)
+
+
+def log_excerpt(text: str, *, limit: int = 40) -> str:
+    """Potongan log LaTeX yang paling berguna untuk memperbaiki bab (MURNI).
+
+    Bukan "40 baris terakhir": ekor log hampir selalu berisi daftar berkas yang
+    dibaca dan ringkasan yang tidak menyebut tempat kesalahannya. Yang dicari
+    adalah baris pertama yang benar-benar menunjuk masalah — galat (``!``) atau
+    peringatan yang salah satu jenisnya dibaca :func:`build_problems` — lalu
+    jendela ``limit`` baris dari dua baris sebelumnya.
+
+    Bila tidak ada satu pun baris seperti itu, potongan diambil dari awal log:
+    pada kompilasi yang gagal sebelum LaTeX sempat menulis apa pun (perkakas
+    tidak ditemukan, berkas template hilang), justru bagian itulah yang berbicara.
+    """
+    lines = text.split("\n")
+    interesting = next((index for index, line in enumerate(lines) if _is_log_signal(line)), None)
+    if interesting is None:
+        return "\n".join(lines[:limit]).strip()
+    return "\n".join(lines[max(interesting - 2, 0) : interesting + limit]).strip()
+
+
+def _is_log_signal(line: str) -> bool:
+    """True bila baris log menunjuk masalah yang dapat dikerjakan (MURNI)."""
+    stripped = line.strip()
+    if stripped.startswith("!"):
+        return True
+    if "Overfull \\hbox" in stripped or "Overfull \\vbox" in stripped:
+        return True
+    if not stripped.startswith("LaTeX Warning:"):
+        return False
+    return any(
+        marker in stripped
+        for marker in ("Reference", "Citation", "multiply defined", "not found")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rujukan silang (§26)
+# ---------------------------------------------------------------------------
+#: Perintah yang memakai ``\label`` bab ini atau bab lain. Daftarnya tertutup
+#: dan sengaja pendek: perintah yang tidak ada di sini tidak akan pernah
+#: dilaporkan menggantung, dan menambahkan perintah paket baru ke sini berarti
+#: memutuskan bahwa paketnya memang dipakai buku ini.
+_REF_COMMANDS: frozenset[str] = frozenset(
+    {"\\ref", "\\eqref", "\\pageref", "\\autoref", "\\cref", "\\Cref"}
+)
+
+
+def extract_ref_keys(tex: str) -> tuple[str, ...]:
+    """Argumen setiap perintah rujukan (``\\ref``, ``\\eqref``, …), tanpa duplikat (MURNI).
+
+    Kembar dari :func:`extract_cite_keys` untuk sisi yang lain: keduanya
+    mengumpulkan **himpunan** hal yang disebut, bukan berapa kali masing-masing
+    disebut.
+    """
+    keys: dict[str, None] = {}
+    for argument in _command_arguments(strip_tex_comments(tex), _REF_COMMANDS):
+        normalized = argument.strip()
+        if normalized:
+            keys.setdefault(normalized, None)
+    return tuple(keys)
+
+
+def _command_arguments(tex: str, commands: frozenset[str]) -> tuple[str, ...]:
+    """Argumen ``{...}`` dari salah satu ``commands``, urut kemunculan (MURNI).
+
+    Berbeda dari :func:`_braced_arguments` yang mencari satu perintah pada satu
+    waktu: di sini urutannya harus urutan dokumen, bukan urutan perintah. Bab
+    yang memakai ``\\eqref`` sebelum ``\\ref`` harus melaporkan keduanya dalam
+    urutan itu, karena laporan yang urutannya berubah-ubah membuat catatan yang
+    seharusnya sama terlihat berbeda setiap kali dijalankan.
+    """
+    found: list[str] = []
+    index = 0
+    while True:
+        start = tex.find("\\", index)
+        if start < 0:
+            return tuple(found)
+
+        cursor = start + 1
+        while cursor < len(tex) and (tex[cursor].isalpha() or tex[cursor] == "*"):
+            cursor += 1
+        name = tex[start:cursor]
+        index = cursor  # selalu maju: nama perintah minimal sepanjang satu karakter
+        if name not in commands:
+            continue
+
+        while cursor < len(tex) and tex[cursor].isspace():
+            cursor += 1
+        while cursor < len(tex) and tex[cursor] == "[":
+            close = tex.find("]", cursor)
+            if close < 0:
+                break
+            cursor = close + 1
+            while cursor < len(tex) and tex[cursor].isspace():
+                cursor += 1
+
+        if cursor < len(tex) and tex[cursor] == "{":
+            close = tex.find("}", cursor)
+            if close < 0:
+                continue
+            found.append(tex[cursor + 1 : close])
+            index = close + 1
+        elif cursor > start:
+            index = cursor
+
+
+def crossref_findings(
+    tex: str,
+    *,
+    bibliography_keys: Sequence[str],
+) -> tuple[str, ...]:
+    """Rujukan silang yang menggantung di dalam teks LaTeX (MURNI).
+
+    Dua hal, dan keduanya dapat diketahui **tanpa menjalankan LaTeX sama sekali**:
+    ``\\ref`` yang tidak menemukan ``\\label`` di dokumen mana pun, dan ``\\cite``
+    yang tidak menemukan entrinya di ``references.bib``.
+
+    Itulah alasan pemeriksaan ini ada meski log kompilasi juga melaporkan
+    keduanya: yang ini tetap bekerja di mesin tanpa LaTeX, dan justru di situlah
+    isyaratnya paling dibutuhkan — pesan "sitasi ini tidak punya entri" jauh
+    lebih berguna daripada kegagalan kompilasi yang tidak dapat dijalankan.
+    """
+    body = strip_tex_comments(tex)
+    labels = {label.strip() for label in extract_labels(body)}
+    used_refs = (
+        ref.strip() for ref in _command_arguments(body, _REF_COMMANDS) if ref.strip()
+    )
+    dangling = tuple(ref for ref in dict.fromkeys(used_refs) if ref not in labels)
+
+    known = {key.strip() for key in bibliography_keys if key.strip()}
+    missing = tuple(key for key in extract_cite_keys(body) if key not in known)
+
+    findings: list[str] = []
+    if dangling:
+        findings.append(
+            "rujukan \\ref yang tidak punya \\label di seluruh buku: " + ", ".join(dangling)
+        )
+    if missing:
+        findings.append(
+            "sitasi yang tidak punya entri daftar pustaka: " + ", ".join(missing)
+        )
+    return tuple(findings)
+
+
+# ---------------------------------------------------------------------------
+# Perakitan ``main.tex`` dari template (§42)
+# ---------------------------------------------------------------------------
+#: Penanda blok daftar bab di dalam ``latex/templates/main.tex``.
+#:
+#: Template bawaan bukan program, jadi ia tidak dapat memanggil perender. Yang
+#: dapat dilakukan adalah menyepakati dua baris penanda, dan itulah bentuk
+#: kesepakatan yang paling tidak mungkin rusak: template yang lupa memuatnya
+#: gagal dengan pesan yang menyebut penandanya, bukan menghasilkan buku tanpa
+#: satu pun bab.
+CHAPTER_BLOCK_BEGIN = "% BUKUAJAR-BAB-MULAI"
+CHAPTER_BLOCK_END = "% BUKUAJAR-BAB-SELESAI"
+
+
+def render_main_tex(
+    template: str,
+    *,
+    title: str,
+    chapter_numbers: Sequence[int],
+) -> str:
+    """Isi ``main.tex`` dari template: judul buku dan daftar ``\\include`` (MURNI).
+
+    Yang disunting hanya dua tempat — baris ``\\title`` dan blok di antara kedua
+    penanda — sehingga template pengguna (``--latex-template``, §42) tetap utuh
+    di luar keduanya. Menyalin ulang seluruh isi template dari nol akan berarti
+    buku prodi yang punya preamble sendiri kehilangan preamblenya.
+
+    Bab disertakan lewat ``\\include`` **tanpa ekstensi**, karena itulah yang
+    diharapkan ``\\include``; nama berkasnya sendiri diambil dari
+    :func:`chapter_latex_filename` supaya ``main.tex`` dan berkas yang benar-benar
+    ditulis tidak dapat menyimpang.
+
+    :raises ConfigError: bila template tidak memuat penanda blok atau baris
+        ``\\title``. Template yang tidak lengkap adalah kesalahan konfigurasi,
+        dan menemukannya di sini jauh lebih murah daripada menemukannya sebagai
+        PDF yang tidak memuat satu pun bab.
+    """
+    lines = template.split("\n")
+    begin = _marker_index(lines, CHAPTER_BLOCK_BEGIN)
+    end = _marker_index(lines, CHAPTER_BLOCK_END)
+    if end < begin:
+        raise ConfigError(
+            f"Template main.tex menaruh {CHAPTER_BLOCK_END} sebelum "
+            f"{CHAPTER_BLOCK_BEGIN}; blok daftar bab tidak dapat diisi."
+        )
+
+    #: `\\include` menambahkan `.tex` sendiri, jadi ekstensinya dibuang di sini.
+    includes = [
+        f"\\include{{chapters/{chapter_latex_filename(number)[: -len('.tex')]}}}"
+        for number in chapter_numbers
+    ]
+    filled = [*lines[: begin + 1], *includes, *lines[end:]]
+
+    escaped = escape_latex(title)
+    titled = [
+        f"\\title{{{escaped}}}" if line.strip().startswith("\\title{") else line
+        for line in filled
+    ]
+    return "\n".join(titled)
+
+
+def _marker_index(lines: Sequence[str], marker: str) -> int:
+    """Indeks baris yang memuat ``marker`` (MURNI).
+
+    :raises ConfigError: bila penandanya tidak ada.
+    """
+    index = next((i for i, line in enumerate(lines) if line.strip().startswith(marker)), None)
+    if index is None:
+        raise ConfigError(
+            f"Template main.tex tidak memuat penanda {marker!r}; berkas itu harus "
+            "berasal dari `latex/templates/main.tex` atau memuat kedua penandanya sendiri."
+        )
+    return index
+
+
+# ---------------------------------------------------------------------------
 # Pencocokan nomor bab
 # ---------------------------------------------------------------------------
 def lock_chapter_number(
@@ -551,17 +957,28 @@ def _fingerprint(text: str) -> str:
 
 
 __all__ = [
+    "CHAPTER_BLOCK_BEGIN",
+    "CHAPTER_BLOCK_END",
+    "LatexBuildResult",
     "LatexChapter",
     "bibliography_entries",
+    "bibliography_sources",
+    "build_advisories",
+    "build_problems",
+    "chapter_citations",
     "chapter_latex_filename",
     "citation_key",
+    "crossref_findings",
     "escape_latex",
     "extract_cite_keys",
     "extract_labels",
+    "extract_ref_keys",
     "inspect_latex",
     "lock_chapter_number",
+    "log_excerpt",
     "render_bibliography",
     "render_chapter_latex",
+    "render_main_tex",
     "strip_tex_comments",
     "unbalanced_environments",
 ]

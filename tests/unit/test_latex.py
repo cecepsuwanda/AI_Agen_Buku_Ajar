@@ -25,18 +25,30 @@ from pathlib import Path
 import pytest
 
 from domain.book import ChapterSpec
+from domain.errors import ConfigError
 from domain.latex import (
+    CHAPTER_BLOCK_BEGIN,
+    CHAPTER_BLOCK_END,
+    LatexBuildResult,
     LatexChapter,
     bibliography_entries,
+    bibliography_sources,
+    build_advisories,
+    build_problems,
+    chapter_citations,
     chapter_latex_filename,
     citation_key,
+    crossref_findings,
     escape_latex,
     extract_cite_keys,
     extract_labels,
+    extract_ref_keys,
     inspect_latex,
     lock_chapter_number,
+    log_excerpt,
     render_bibliography,
     render_chapter_latex,
+    render_main_tex,
     strip_tex_comments,
     unbalanced_environments,
 )
@@ -634,3 +646,294 @@ def test_main_tex_includes_chapters_from_the_directory_they_are_written_to() -> 
 def test_the_templates_directory_is_a_real_path() -> None:
     assert isinstance(templates_dir(), Path)
     assert templates_dir().is_dir()
+
+
+# ---------------------------------------------------------------------------
+# bibliography_sources / chapter_citations — satu sumber untuk dua pemakai
+# ---------------------------------------------------------------------------
+def test_book_and_draft_sources_are_merged_in_order_without_duplicates() -> None:
+    """Bab yang mengutip ulang sumber bab 1 tidak boleh menghasilkan entri kedua."""
+    assert bibliography_sources([CORMEN], [SEDGEWICK, CORMEN]) == (CORMEN, SEDGEWICK)
+
+
+def test_surrounding_whitespace_is_stripped_from_draft_sources() -> None:
+    """Nama sumber yang berbeda spasi adalah sumber yang sama, bukan sumber lain."""
+    assert bibliography_sources([], [f"  {CORMEN}  "]) == (CORMEN,)
+
+
+def test_no_source_at_all_yields_an_empty_list() -> None:
+    assert bibliography_sources([], []) == ()
+
+
+def test_chapter_citations_pairs_only_the_sources_the_draft_actually_used() -> None:
+    """Daftar kunci yang dikirim ke model adalah daftar tertutup untuk bab ini."""
+    pairs = chapter_citations([CORMEN, SEDGEWICK], [CORMEN])
+
+    assert pairs == ((citation_key(CORMEN), CORMEN),)
+
+
+def test_a_draft_source_that_is_not_in_the_bibliography_is_dropped() -> None:
+    """Sumber di luar daftar buku adalah kunci tanpa entri — dan entri tanpa kunci."""
+    assert chapter_citations([CORMEN], [SEDGEWICK]) == ()
+
+
+def test_chapter_citations_keeps_one_pair_per_source_however_often_it_is_cited() -> None:
+    assert len(chapter_citations([CORMEN], [CORMEN, CORMEN])) == 1
+
+
+# ---------------------------------------------------------------------------
+# build_problems / build_advisories — apa yang menahan dan apa yang tidak
+# ---------------------------------------------------------------------------
+def test_a_clean_build_has_neither_problems_nor_advisories() -> None:
+    result = LatexBuildResult(ok=True)
+
+    assert build_problems(result) == ()
+    assert build_advisories(result) == ()
+
+
+def test_a_compilation_error_is_a_problem() -> None:
+    problems = build_problems(LatexBuildResult(ok=False, errors=("Missing $ inserted.",)))
+
+    assert any("Missing $ inserted." in problem for problem in problems)
+
+
+def test_a_failed_build_without_readable_errors_is_still_a_problem() -> None:
+    """``latexmk`` yang keluar non-nol tanpa pesan apa pun tetap berarti tidak ada PDF."""
+    problems = build_problems(LatexBuildResult(ok=False))
+
+    assert problems == ("kompilasi tidak menghasilkan PDF",)
+
+
+def test_an_unreadable_error_list_wins_over_the_generic_message() -> None:
+    """Pesan umum hanya dipakai bila tidak ada yang lebih spesifik untuk dikatakan."""
+    problems = build_problems(LatexBuildResult(ok=False, errors=("Undefined control sequence.",)))
+
+    assert "kompilasi tidak menghasilkan PDF" not in problems
+
+
+def test_a_missing_figure_blocks_even_though_the_log_has_no_error_line() -> None:
+    """Gambar yang hilang tidak selalu muncul sebagai baris ``!`` — dan tetap menahan."""
+    problems = build_problems(LatexBuildResult(ok=True, missing_figures=("figures/graf.png",)))
+
+    assert any("figures/graf.png" in problem for problem in problems)
+
+
+def test_a_dangling_citation_is_a_problem() -> None:
+    problems = build_problems(LatexBuildResult(ok=True, undefined_citations=("karangan-1a2b",)))
+
+    assert any("karangan-1a2b" in problem for problem in problems)
+
+
+def test_a_duplicate_label_is_a_problem() -> None:
+    problems = build_problems(LatexBuildResult(ok=True, duplicate_labels=("sec:bigo",)))
+
+    assert any("sec:bigo" in problem for problem in problems)
+
+
+def test_a_dangling_reference_is_advisory_rather_than_blocking() -> None:
+    """Bab adalah potongan: ``\\ref`` ke bab lain selalu tampak menggantung di sini.
+
+    Menolak setiap bab yang merujuk bab sebelumnya berarti tidak ada satu pun
+    buku yang dapat lolos. Yang tahu jawabannya adalah kompilasi tingkat buku.
+    """
+    result = LatexBuildResult(ok=True, undefined_refs=("chap:2",))
+
+    assert build_problems(result) == ()
+    assert any("chap:2" in advisory for advisory in build_advisories(result))
+
+
+def test_an_overfull_box_is_advisory_with_its_count() -> None:
+    result = LatexBuildResult(ok=True, overfull_boxes=("Overfull \\hbox (9.5pt too wide)",))
+
+    assert build_problems(result) == ()
+    assert any("1" in advisory for advisory in build_advisories(result))
+
+
+def test_unclassified_warnings_are_passed_on_as_advisories() -> None:
+    result = LatexBuildResult(ok=True, warnings=("Package hyperref Warning: x",))
+
+    advisories = build_advisories(result)
+
+    assert any("hyperref" in advisory for advisory in advisories)
+
+
+# ---------------------------------------------------------------------------
+# log_excerpt — jendela di sekitar isyarat pertama
+# ---------------------------------------------------------------------------
+def test_the_excerpt_skips_the_header_and_starts_near_the_signal() -> None:
+    noise = [f"bising {index}" for index in range(30)]
+    text = "\n".join([*noise, "! Missing $ inserted.", "a", "b"])
+
+    excerpt = log_excerpt(text)
+
+    assert "Missing $ inserted" in excerpt
+    assert "bising 0" not in excerpt
+
+
+def test_the_excerpt_keeps_the_two_lines_before_the_signal() -> None:
+    """Konteks sebelum galat sering memuat lingkungan tempat galatnya terjadi."""
+    text = "\n".join(["sebelum-1", "sebelum-2", "! Galat.", "sesudah"])
+
+    assert log_excerpt(text).splitlines()[0] == "sebelum-1"
+
+
+def test_an_overfull_box_counts_as_a_signal() -> None:
+    noise = [f"bising {index}" for index in range(30)]
+    text = "\n".join([*noise, "Overfull \\hbox (9.5pt too wide)"])
+
+    assert "Overfull" in log_excerpt(text)
+
+
+def test_a_generic_warning_is_not_a_signal() -> None:
+    """Kalau setiap peringatan dianggap isyarat, jendelanya berhenti di baris pertama."""
+    text = "\n".join(
+        [*(f"Package foo Warning: {index}" for index in range(30)), "! Galat.", "ekor"]
+    )
+
+    assert "Galat" in log_excerpt(text)
+
+
+def test_a_log_without_any_signal_falls_back_to_its_first_lines() -> None:
+    text = "\n".join(f"baris {index}" for index in range(100))
+
+    lines = log_excerpt(text).splitlines()
+
+    assert lines[0] == "baris 0"
+
+
+def test_the_window_is_capped() -> None:
+    text = "\n".join(["! Galat.", *(f"ekor {index}" for index in range(200))])
+
+    assert len(log_excerpt(text).splitlines()) <= 41
+
+
+def test_an_empty_log_yields_an_empty_excerpt() -> None:
+    assert log_excerpt("") == ""
+
+
+# ---------------------------------------------------------------------------
+# extract_ref_keys / crossref_findings
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("command", ["ref", "eqref", "pageref", "autoref", "cref", "Cref"])
+def test_every_reference_command_is_recognised(command: str) -> None:
+    """Perintah yang tidak dikenali berarti rujukan menggantung yang tidak terlihat."""
+    assert extract_ref_keys(f"lihat \\{command}{{sec:a}}") == ("sec:a",)
+
+
+def test_a_reference_key_is_reported_once_however_often_it_appears() -> None:
+    assert extract_ref_keys(r"\ref{a} dan \ref{a}") == ("a",)
+
+
+def test_an_optional_argument_on_a_reference_is_skipped() -> None:
+    assert extract_ref_keys(r"\cref[a]{b}") == ("b",)
+
+
+def test_a_commented_reference_is_not_counted() -> None:
+    assert extract_ref_keys("% \\ref{a}") == ()
+
+
+def test_a_reference_pointing_at_a_missing_label_is_reported() -> None:
+    findings = crossref_findings(r"\ref{sec:hilang}", bibliography_keys=())
+
+    assert any("sec:hilang" in finding for finding in findings)
+
+
+def test_a_reference_pointing_at_an_existing_label_is_silent() -> None:
+    tex = "\\label{sec:ada}\nlihat \\ref{sec:ada}"
+
+    assert crossref_findings(tex, bibliography_keys=()) == ()
+
+
+def test_a_citation_without_a_bibliography_entry_is_reported() -> None:
+    findings = crossref_findings(r"\cite{karangan}", bibliography_keys=("cormen-1a2b3c4d",))
+
+    assert any("karangan" in finding for finding in findings)
+
+
+def test_a_citation_with_a_bibliography_entry_is_silent() -> None:
+    tex = r"\cite{cormen-1a2b3c4d}"
+
+    assert crossref_findings(tex, bibliography_keys=("cormen-1a2b3c4d",)) == ()
+
+
+def test_both_kinds_of_findings_can_be_reported_at_once() -> None:
+    tex = "lihat \\ref{hilang} dan \\cite{karangan}"
+
+    findings = crossref_findings(tex, bibliography_keys=("ada-1a2b3c4d",))
+
+    assert len(findings) == 2
+
+
+# ---------------------------------------------------------------------------
+# render_main_tex — skeleton buku dari template
+# ---------------------------------------------------------------------------
+def _template() -> str:
+    return (
+        "\\documentclass{book}\n"
+        "\\title{Buku Ajar}\n"
+        f"{CHAPTER_BLOCK_BEGIN}\n"
+        "% \\include{chapters/chapter01}\n"
+        f"{CHAPTER_BLOCK_END}\n"
+        "\\begin{document}\n\\maketitle\n\\end{document}\n"
+    )
+
+
+def test_each_chapter_becomes_one_include_line() -> None:
+    rendered = render_main_tex(_template(), title="Algoritma", chapter_numbers=(1, 2))
+
+    assert "\\include{chapters/chapter01}" in rendered
+    assert "\\include{chapters/chapter02}" in rendered
+
+
+def test_the_placeholder_lines_inside_the_block_are_replaced() -> None:
+    """Baris contoh di dalam penanda adalah komentar, tetapi tetap harus hilang."""
+    rendered = render_main_tex(_template(), title="Algoritma", chapter_numbers=(1,))
+
+    body = rendered.split(CHAPTER_BLOCK_BEGIN)[1].split(CHAPTER_BLOCK_END)[0]
+
+    assert body.strip() == "\\include{chapters/chapter01}"
+
+
+def test_the_title_line_is_replaced_with_escaped_title() -> None:
+    rendered = render_main_tex(_template(), title="Algoritma & Struktur", chapter_numbers=())
+
+    assert "\\title{Algoritma \\& Struktur}" in rendered
+    assert "\\title{Buku Ajar}" not in rendered
+
+
+def test_the_rest_of_the_template_is_left_untouched() -> None:
+    """Prodi yang punya preamble sendiri tidak boleh kehilangan preamblenya."""
+    rendered = render_main_tex(_template(), title="X", chapter_numbers=(1,))
+
+    assert rendered.startswith("\\documentclass{book}\n")
+    assert "\\maketitle" in rendered
+
+
+def test_no_chapter_yields_an_empty_block_rather_than_stale_includes() -> None:
+    rendered = render_main_tex(_template(), title="X", chapter_numbers=())
+
+    body = rendered.split(CHAPTER_BLOCK_BEGIN)[1].split(CHAPTER_BLOCK_END)[0]
+
+    assert body.strip() == ""
+
+
+def test_a_template_without_the_markers_is_refused_loudly() -> None:
+    """Skeleton yang diisi di tempat yang salah lebih buruk daripada skeleton yang gagal."""
+    with pytest.raises(ConfigError):
+        render_main_tex("\\documentclass{book}\n", title="X", chapter_numbers=(1,))
+
+
+def test_inverted_markers_are_refused() -> None:
+    template = f"{CHAPTER_BLOCK_END}\n{CHAPTER_BLOCK_BEGIN}\n"
+
+    with pytest.raises(ConfigError):
+        render_main_tex(template, title="X", chapter_numbers=(1,))
+
+
+def test_the_shipped_template_has_the_markers_in_order() -> None:
+    """Kopling yang tidak dapat ditegakkan pemeriksa tipe: konstanta dan berkasnya."""
+    template = (templates_dir() / "main.tex").read_text(encoding="utf-8")
+
+    assert render_main_tex(template, title="X", chapter_numbers=(1, 2)).count(
+        "\\include{chapters/chapter"
+    ) == 2

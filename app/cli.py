@@ -214,6 +214,7 @@ def _params(
     chapters_to: int | None = None,
     force: bool = False,
     dry_run: bool = False,
+    latex: bool = False,
 ) -> RunParams:
     """Bangun :class:`~app.commands.RunParams` dari opsi yang sudah di-parse.
 
@@ -244,6 +245,7 @@ def _params(
         chapters_to=chapters_to,
         force=bool(force),
         dry_run=bool(dry_run),
+        latex=bool(latex),
     )
 
 
@@ -548,8 +550,16 @@ def export(
     verbose: VerboseOpt = None,
     log_json: LogJsonOpt = None,
     output: OutputOpt = None,
+    latex: bool = typer.Option(
+        False,
+        "--latex",
+        help="Rakit dan kompilasi buku LaTeX menjadi output/latex/book.pdf (§42).",
+    ),
 ) -> None:
-    """Gabungkan bab yang sudah disetujui menjadi output/book.md."""
+    """Gabungkan bab yang sudah disetujui menjadi output/book.md.
+
+    Dengan ``--latex``, buku LaTeX-nya ikut dirakit dan dikompilasi.
+    """
     raise typer.Exit(
         code=do_export(
             _params(
@@ -560,6 +570,7 @@ def export(
                 verbose=verbose,
                 log_json=log_json,
                 output=output,
+                latex=latex,
             )
         )
     )

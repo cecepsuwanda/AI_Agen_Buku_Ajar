@@ -1,0 +1,12 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex)
+entering extended mode
+(probe.tex
+LaTeX2e <2023-11-01>
+(./chapters/chapter01.tex
+Chapter 1.
+Overfull \hbox (17.62482pt too wide) in paragraph at lines 14--16
+[]\T1/cmr/m/n/10 Algoritma pengurutan menggabungkan dua larik terurut menjadi s
+atu larik terurut yang lebih besar.
+[1] (./probe.aux)
+Output written on probe.pdf (1 page, 40112 bytes).
+Transcript written on probe.log.

@@ -45,6 +45,7 @@ from domain.ports import (
     Clock,
     CorpusIndexer,
     LatexArtifacts,
+    LatexCompiler,
     ModelProvider,
     PromptLibrary,
     Reporter,
@@ -53,6 +54,8 @@ from domain.ports import (
     StateStore,
 )
 from latex.artifacts import FileLatexArtifacts
+from latex.compiler import LatexmkCompiler
+from latex.dry_run import DryRunLatexCompiler
 from memory.artifacts import MarkdownArtifacts
 from memory.project_state import BOOK_FILENAME, JsonStateStore
 from models.dry_run import DryRunChatModel
@@ -288,6 +291,16 @@ class Container:
     state_store: StateStore
     artifacts: ChapterArtifacts
     director: BookDirector
+    #: Perkakas kompilasi LaTeX (§26), atau ``None`` bila tidak ada.
+    #:
+    #: Disimpan di container meski gate §26 sudah menerimanya, karena ia punya
+    #: pemakai **kedua** di luar pipeline bab: ``export --latex`` merakit seluruh
+    #: buku dan mengompilasinya sekali (§42). Yang dipakai perintah itu bukan
+    #: port ``LatexCompiler`` melainkan adapter konkretnya — ``compile_book``
+    #: memang hanya ada di sana — dan itulah alasan sebenarnya field ini ada di
+    #: sini: satu kompiler per proses, dirakit sekali, dengan konfigurasi yang
+    #: sama untuk kedua pemakainya.
+    latex_compiler: LatexCompiler | None = None
     #: Indeks vektor (§13), atau ``None`` pada ``--dry-run``.
     #:
     #: Ada di container — bukan dibangun ulang oleh perintah ``ingest`` — karena
@@ -387,6 +400,7 @@ def build_director(
     retriever: Retriever | None = None,
     max_revisions: int | None = None,
     latex: LatexArtifacts | None = None,
+    compiler: LatexCompiler | None = None,
 ) -> BookDirector:
     """Rakit orkestrator beserta seluruh agent dan gate-nya.
 
@@ -408,6 +422,11 @@ def build_director(
         yang tahu apakah jalankan ini boleh **menulis berkas** — dan pada
         ``--dry-run`` jawabannya tidak, sebab jalur keluaran sedang menunjuk ke
         sandbox sekali pakai.
+    :param compiler: perkakas kompilasi (§26). ``None`` berarti gate §26 menjadi
+        pass-through: sumber LaTeX-nya ditulis, tetapi tidak ada yang
+        mengompilasinya. Dipisahkan dari ``latex`` karena keduanya memang dapat
+        gagal terpisah — direktori keluaran selalu dapat ditulis, sedangkan
+        ``latexmk`` belum tentu terpasang.
     """
     repair_attempts = config.retry.repair_attempts
     style_guide = config.book.style_guide
@@ -422,6 +441,7 @@ def build_director(
             review_threshold=config.book.review_threshold,
             repair_attempts=repair_attempts,
             latex=latex,
+            compiler=compiler,
         ),
     )
 
@@ -462,6 +482,64 @@ def build_director(
             style_guide=style_guide,
         ),
     )
+
+
+def build_latex_compiler(
+    paths: ProjectPaths,
+    config: AppConfig,
+    *,
+    dry_run: bool = False,
+) -> LatexCompiler | None:
+    """Rakit perkakas kompilasi LaTeX (§26), atau ``None`` bila tidak ada.
+
+    Tiga jawaban, dan ketiganya berbeda artinya:
+
+    1. **``--dry-run``** → :class:`~latex.dry_run.DryRunLatexCompiler`. Gate §26
+       benar-benar berjalan — ia dibangun, menerima port, dan menempuh alurnya
+       sampai vonis — tetapi jawabannya tidak dibaca dari mesin ini. Itulah yang
+       membuat ``--dry-run`` tetap menjanjikan nol ketergantungan pada
+       terpasangnya LaTeX.
+    2. **LaTeX mati, atau perkakasnya tidak dapat dijalankan** → ``None``, dan
+       gate §26 menjadi pass-through. Buku tanpa kompilasi tetap buku; yang tidak
+       boleh terjadi adalah bab yang diklaim terkkompilasi padahal tidak ada yang
+       mengompilasinya.
+    3. **Ada** → :class:`~latex.compiler.LatexmkCompiler`.
+
+    "Tidak dapat dijalankan" bukan "tidak ada di ``PATH``": ``latexmk`` di
+    MiKTeX adalah shim yang menuntut ``perl``, dan tanpa ``perl`` shim-nya tetap
+    ada sementara setiap pemanggilannya gagal. Pemeriksaannya karena itu
+    dijalankan sekali di mesin ini — lihat
+    :meth:`~latex.compiler.LatexmkCompiler.available`.
+
+    Pemeriksaan itu ada di sini, bukan di dalam gate, karena hanya composition
+    root yang boleh tahu tentang mesin ini — dan gate yang memeriksanya sendiri
+    adalah gate yang tidak dapat diuji tanpa mesin ini.
+    """
+    if not config.latex.enabled:
+        return None
+    if dry_run:
+        return DryRunLatexCompiler()
+    compiler = LatexmkCompiler(
+        paths.latex_dir,
+        engine=config.latex.engine,
+        timeout_s=config.latex.timeout_s,
+        keep_aux=config.latex.keep_aux,
+        template_dir=_template_dir(paths, config),
+    )
+    return compiler if compiler.available() else None
+
+
+def _template_dir(paths: ProjectPaths, config: AppConfig) -> Path | None:
+    """Direktori template LaTeX dari konfigurasi (MURNI).
+
+    ``None`` berarti template bawaan di ``latex/templates/``. Menyelesaikannya
+    terhadap root project di sini — bukan di dalam adapter — mengikuti aturan yang
+    sama dengan seluruh jalur lain: penyelesaian jalur terjadi sekali, di satu
+    tempat, sehingga tidak ada modul yang menebak direktori kerja saat ini.
+    """
+    if config.latex.template_dir is None:
+        return None
+    return paths.root / config.latex.template_dir
 
 
 def build_retry_policy(config: AppConfig) -> "Retrying":
@@ -576,6 +654,7 @@ def build_container(
     latex: LatexArtifacts | None = (
         FileLatexArtifacts(paths.latex_dir) if config.latex.enabled else None
     )
+    compiler = build_latex_compiler(paths, config, dry_run=dry_run)
 
     return Container(
         config=config,
@@ -598,7 +677,9 @@ def build_container(
             retriever=retriever,
             max_revisions=max_revisions,
             latex=latex,
+            compiler=compiler,
         ),
+        latex_compiler=compiler,
         indexer=store,
     )
 
@@ -617,6 +698,7 @@ __all__ = [
     "build_console_reporter",
     "build_container",
     "build_director",
+    "build_latex_compiler",
     "build_registry",
     "build_retry_policy",
     "build_vector_store",

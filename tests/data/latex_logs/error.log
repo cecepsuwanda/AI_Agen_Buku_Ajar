@@ -1,0 +1,20 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex)
+entering extended mode
+(probe.tex
+LaTeX2e <2023-11-01>
+(/path/preamble.tex)
+(./chapters/chapter01.tex
+Chapter 1.
+! Missing $ inserted.
+<inserted text>
+                $
+l.12 Notasi O(n) tumbuh linear terhadap n_0
+                                             dan seterusnya.
+?
+! Emergency stop.
+<inserted text>
+                $
+l.12 Notasi O(n) tumbuh linear terhadap n_0
+
+No pages of output.
+Transcript written on probe.log.

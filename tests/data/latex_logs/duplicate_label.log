@@ -1,0 +1,13 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex)
+entering extended mode
+(probe.tex
+LaTeX2e <2023-11-01>
+(./chapters/chapter01.tex
+Chapter 1.
+LaTeX Warning: Label `sec:bigo' multiply defined.
+
+LaTeX Warning: Label `sec:bigo' multiply defined.
+
+[1] (./probe.aux)
+Output written on probe.pdf (1 page, 37420 bytes).
+Transcript written on probe.log.

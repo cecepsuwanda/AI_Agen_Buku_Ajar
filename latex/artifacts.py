@@ -108,10 +108,15 @@ class FileLatexArtifacts:
     berpindah, yang berubah adalah konstanta di modul ini, bukan setiap
     pemanggil.
 
-    Tidak ada method yang membaca: sumber LaTeX adalah **turunan** dari
-    ``ChapterRecord`` persis seperti Markdown, dan bila berkasnya hilang ia
-    dirender ulang dengan murah karena :func:`domain.latex.render_chapter_latex`
-    murni. Satu arah saja, sama seperti :class:`~memory.artifacts.MarkdownArtifacts`.
+    Port ini hampir seluruhnya satu arah — tulis, jangan baca — sama seperti
+    :class:`~memory.artifacts.MarkdownArtifacts`. Satu pengecualian, dan alasannya
+    membedakan LaTeX dari Markdown: **perendernya murni, tetapi masukannya tidak
+    gratis.** :func:`~domain.latex.render_chapter_latex` merakit ``.tex`` dari
+    :class:`~domain.latex.LatexChapter` yang dihasilkan model, sehingga berkas
+    yang hilang hanya dapat dibangun ulang dengan satu panggilan LLM lagi.
+    :meth:`load_chapter` menutup jalan itu: gate §26 membaca berkas yang sudah
+    ada, dan dengan begitu yang dikompilasinya adalah persis yang ditulis gate
+    §25 — bukan bab yang dihasilkan ulang dengan cara yang mungkin berbeda.
     """
 
     def __init__(self, latex_dir: Path) -> None:
@@ -145,6 +150,27 @@ class FileLatexArtifacts:
         path = self.chapter_path(number)
         atomic_write_text(path, text)
         return str(path)
+
+    def load_chapter(self, number: int) -> str | None:
+        """Baca ``output/latex/chapters/chapterNN.tex``; ``None`` bila belum ada.
+
+        Bukan berkas yang hilang yang membuatnya mengembalikan ``None``, melainkan
+        bab yang belum pernah mencapai tahap penulisan LaTeX — dan pemanggilnya
+        yang memutuskan apa artinya. Gate §26 memperlakukannya sebagai prasyarat
+        yang tidak terpenuhi, bukan sebagai bab yang lulus tanpa diperiksa:
+        "tidak ada yang dapat dikompilasi" dan "kompilasinya bersih" adalah dua
+        hal yang berbeda, dan menyamakannya berarti melaporkan bab yang tidak
+        pernah diperiksa sebagai bab yang lolos.
+        """
+        path = self.chapter_path(number)
+        try:
+            return path.read_text(encoding="utf-8")
+        except (FileNotFoundError, NotADirectoryError):
+            # Hanya "belum ada" yang menjadi ``None``. Kegagalan baca yang lain —
+            # izin, encoding, handle yang tertahan — dibiarkan naik: menjadikannya
+            # "belum ada" akan menuduh bab belum pernah ditulis padahal berkasnya
+            # ada dan justru sedang bermasalah.
+            return None
 
     def save_bibliography(self, text: str) -> str:
         """Tulis ``output/latex/references.bib``, kembalikan jalurnya.

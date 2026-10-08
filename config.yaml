@@ -54,7 +54,12 @@ pipeline:
   # begitu: LATEX_GENERATED berada setelah REVIEWED. Ia juga satu-satunya gate
   # yang menulis berkas, dan ia menulis hanya bila `latex.enabled` — dimatikan,
   # nama ini tetap di daftar dan gate-nya menjadi pass-through.
-  gates: [example_writer, exercise_writer, fact_checker, citation_checker, reviewer, latex_writer]
+  #
+  # `latex_qa` menutup tahap LaTeX (§26): ia mengompilasi potongan yang baru
+  # saja ditulis `latex_writer`, dan bila gagal ia memperbaiki lebih dulu
+  # sebelum menolak. Ia menjadi pass-through bila `latex.enabled: false` ATAU
+  # bila `latexmk` tidak ada di PATH.
+  gates: [example_writer, exercise_writer, fact_checker, citation_checker, reviewer, latex_writer, latex_qa]
 
 # -----------------------------------------------------------------------------
 # RAG (§10, §13). Indeks dibangun perintah tersendiri: `ai-book ingest`.

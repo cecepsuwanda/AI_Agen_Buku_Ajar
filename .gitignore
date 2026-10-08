@@ -262,6 +262,19 @@ output/latex/**/*.toc
 output/latex/**/*.synctex.gz
 output/latex/**/*.xdv
 
+# --- Berkas log contoh untuk tes parser (§26) --------------------------------
+# Pengecualian dari `*.log` di atas, dan pengecualiannya disengaja: kedelapan
+# berkas di sini adalah **bahan uji**, bukan turunan. `tests/unit/test_latex_validator.py`
+# membacanya untuk membuktikan bahwa kedelapan jenis masalah §26 benar-benar
+# terbaca; parser yang kehilangan berkas bahannya tidak gagal — ia hanya
+# kehilangan gigi, dan tetap hijau.
+#
+# Isinya ditulis tangan sebagai bentuk yang **diharapkan** dari LaTeX, sehingga
+# berkas-berkas ini juga satu-satunya tempat bentuk itu dinyatakan. Yang
+# membuktikan bahwa harapan itu benar adalah `tests/live/test_latex_compile.py`,
+# yang mengompilasi sungguhan dan membandingkannya.
+!tests/data/latex_logs/*.log
+
 # --- CATATAN PENTING (§39) ---------------------------------------------------
 # output/ SENGAJA TIDAK di-ignore: source buku (Markdown hari ini, LaTeX nanti)
 # harus berada di Git agar revisi AI dapat dilacak per bab.

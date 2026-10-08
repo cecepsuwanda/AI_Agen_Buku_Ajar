@@ -151,6 +151,20 @@ def prompt_contexts(
             "draft_json": '{"title": "Analisis Kompleksitas"}',
             "feedback": ("kunci sitasi ditaruh di luar daftar yang diberikan.",),
         },
+        "latex.repair": {
+            **common,
+            # Bentuknya sengaja berbeda dari ``latex.chapter``: yang dikirim ke
+            # model di sini adalah **potongan jadi** yang gagal dikompilasi,
+            # beserta log dan temuan yang harus diperbaiki (§26).
+            "citations": (("cormen-introduction-3f2a91b4", "Cormen, Algorithms, 4th ed."),),
+            "fragment": (
+                "\\chapter{Analisis Kompleksitas}\n"
+                "\\label{chap:2}\n"
+                "Notasi $O(n)$ & temannya.\n"
+            ),
+            "findings": ("galat LaTeX: Misplaced alignment tab character &.",),
+            "log_excerpt": "! Misplaced alignment tab character &.\nl.3 Notasi $O(n)$ &",
+        },
         "planner.book": {
             "title": "Algoritma dan Struktur Data",
             "audience": "mahasiswa S1",

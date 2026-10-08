@@ -1,0 +1,13 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex)
+entering extended mode
+(probe.tex
+LaTeX2e <2023-11-01>
+(./chapters/chapter01.tex
+Chapter 1.
+LaTeX Warning: Citation `cormen-introduction-3f2a91b4' on page 1 undefined on input line 9.
+
+LaTeX Warning: There were undefined references.
+
+[1{/path/fonts/.../cmr10.pfb}] (./probe.aux)
+Output written on probe.pdf (1 page, 38210 bytes).
+Transcript written on probe.log.

@@ -42,6 +42,8 @@ from domain.errors import GatePreconditionError
 from domain.latex import (
     LatexChapter,
     bibliography_entries,
+    bibliography_sources,
+    chapter_citations,
     inspect_latex,
     lock_chapter_number,
     render_bibliography,
@@ -147,23 +149,13 @@ class LatexWriterGate:
         if draft is None:
             raise GatePreconditionError(self.name, record.number, "draf")
 
-        # Sumber daftar pustaka adalah **gabungan** dua hal, dan keduanya perlu:
-        # ``book.citations`` memuat sumber yang sudah lolos pemeriksaan sitasi
-        # pada bab-bab sebelumnya — tanpa itu, ``\cite`` bab ini yang menunjuk
-        # sumber dari bab 1 akan menggantung. ``draft.citations`` memuat sumber
-        # yang barusan dipakai bab ini, dan entri buku baru diperbarui *sesudah*
-        # bab ini selesai.
-        sources = tuple(
-            dict.fromkeys((*book.citations.values(), *(s.strip() for s in draft.citations)))
-        )
+        # Sumber daftar pustaka dan daftar kunci tertutup bab ini dihitung
+        # :mod:`domain.latex`: gate §26 memakai aturan yang sama persis, dan dua
+        # salinan aturan itu akan menyimpang menjadi sitasi menggantung.
+        sources = bibliography_sources(tuple(book.citations.values()), draft.citations)
         entries = bibliography_entries(sources)
-        key_by_source = {source: key for key, source in entries}
-        chapter_citations = tuple(
-            (key_by_source[source], source)
-            for source in dict.fromkeys(s.strip() for s in draft.citations)
-            if source and source in key_by_source
-        )
-        allowed = tuple(key for key, _ in chapter_citations)
+        pairs = chapter_citations(sources, draft.citations)
+        allowed = tuple(key for key, _ in pairs)
 
         produced = LatexChapter(number=spec.number, title=spec.title)
         notes: tuple[str, ...] = ()
@@ -173,7 +165,7 @@ class LatexWriterGate:
         for attempt in range(self._repair_attempts + 1):
             attempts = attempt + 1
             produced = self._agent.write(
-                draft, spec=spec, book=book, citations=chapter_citations, feedback=findings
+                draft, spec=spec, book=book, citations=pairs, feedback=findings
             )
             produced, notes = lock_chapter_number(produced, number=spec.number)
             _, findings = inspect_latex(produced, allowed_citations=allowed)
@@ -189,7 +181,7 @@ class LatexWriterGate:
         feedback.append(
             f"Daftar pustaka ({len(entries)} entri) ditulis ke {bibliography_path}."
         )
-        if not chapter_citations:
+        if not pairs:
             feedback.append(
                 "Bab ini tidak mengutip satu pun sumber, sehingga tidak ada \\cite "
                 "yang ditulis."

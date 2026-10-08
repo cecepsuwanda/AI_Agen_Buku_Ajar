@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 from rich.table import Table
 
@@ -34,7 +34,7 @@ from app.reporting import RichReporter
 from domain.book import BookRequest, BookSpec, StyleGuide
 from domain.chapter import ChapterRecord
 from domain.document import Document
-from domain.enums import is_approved, is_problem
+from domain.enums import ChapterStatus, is_approved, is_problem
 from domain.errors import (
     BookNotPlannedError,
     BukuAjarError,
@@ -44,12 +44,15 @@ from domain.errors import (
     ServiceUnavailableError,
     StateCorruptError,
 )
+from domain.latex import bibliography_sources, build_advisories, build_problems
 from domain.rendering import render_book_markdown, render_chapter_markdown
 from domain.rps import CoursePlan, render_course_plan
 from domain.state import RunReport
+from domain.transitions import has_reached
 from ingestion.document_normalizer import normalize_documents
 from ingestion.loader import IngestedFile, OcrRoute, load_reference_files
 from ingestion.rps_loader import parse_rps
+from latex.compiler import LatexmkCompiler
 from memory.project_state import BOOK_FILENAME
 from models.ollama_client import list_installed_models, probe_model
 from rag.chunker import chunk_documents
@@ -132,6 +135,13 @@ class RunParams:
     # -- perilaku ----------------------------------------------------------
     force: bool = False
     dry_run: bool = False
+    #: ``export --latex``: rakit dan kompilasi buku LaTeX (§42).
+    #:
+    #: Berlaku pada ``export`` saja. Pada perintah lain ia tidak berpengaruh —
+    #: dan itu bukan kelalaian: satu objek parameter dipakai lima perintah, dan
+    #: menambahkan field yang hanya dibaca salah satunya lebih murah daripada
+    #: memecah objeknya menjadi lima yang kemudian menyimpang.
+    latex: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -903,7 +913,10 @@ def _print_roles(reporter: RichReporter, container: Container) -> None:
 # export
 # ---------------------------------------------------------------------------
 def do_export(params: RunParams) -> int:
-    """Gabungkan bab-bab yang sudah disetujui menjadi ``output/book.md`` (§39)."""
+    """Gabungkan bab-bab yang sudah disetujui menjadi ``output/book.md`` (§39).
+
+    Dengan ``--latex``, buku LaTeX-nya juga dirakit dan dikompilasi (§42).
+    """
     reporter = build_console_reporter(verbose=params.globals.verbose)
     return guarded(reporter, lambda: _export(params, reporter))
 
@@ -922,7 +935,98 @@ def _export(params: RunParams, reporter: RichReporter) -> int:
     if pending:
         numbers = ", ".join(str(number) for number in pending)
         reporter.warn(f"Bab {numbers} belum disetujui dan tidak ikut digabung.")
+
+    if params.latex and _export_latex(container, reporter, spec) != 0:
+        return 1
     return 0
+
+
+def _export_latex(container: Container, reporter: RichReporter, spec: BookSpec) -> int:
+    """Rakit dan kompilasi buku LaTeX menjadi ``output/latex/book.pdf`` (§42).
+
+    Bab yang ikut adalah bab yang **sudah dikompilasi** gate §26, bukan bab yang
+    sekadar disetujui. Bedanya penting: bab yang belum melewati §26 belum pernah
+    dibuktikan dapat dikompilasi, dan merakitnya bersama bab lain akan
+    memindahkan galatnya ke kompilasi buku — tempat satu galat menahan seluruh
+    PDF, bukan satu bab.
+
+    :returns: kode keluar perintah.
+    """
+    compiler = container.latex_compiler
+    if not isinstance(compiler, LatexmkCompiler):
+        reporter.console.print(
+            "Perkakas LaTeX tidak tersedia, jadi buku LaTeX tidak dapat dirakit. "
+            "Periksa `latex.enabled` dan `latex.engine` di konfigurasi, atau "
+            "jalankan `ai-book doctor`."
+        )
+        return 1
+
+    numbers, skipped = _latex_parts(container, spec)
+    if not numbers:
+        reporter.console.print("Belum ada bab yang dikompilasi LaTeX untuk dirakit.")
+        return 1
+
+    result = compiler.compile_book(
+        title=spec.title,
+        chapter_numbers=numbers,
+        sources=_book_sources(container, numbers),
+        destination=container.paths.latex_dir / "book.pdf",
+    )
+    if skipped:
+        listing = ", ".join(str(number) for number in skipped)
+        reporter.warn(f"Bab {listing} belum sampai tahap kompilasi LaTeX dan tidak ikut dirakit.")
+
+    if not result.ok:
+        reporter.console.print("[red]Buku LaTeX gagal dikompilasi.[/red]")
+        for problem in build_problems(result):
+            reporter.console.print(f"  - {problem}")
+        if result.log_excerpt:
+            reporter.console.print(result.log_excerpt)
+        return 1
+
+    reporter.console.print(
+        f"[green]{len(numbers)} bab dirakit[/green] -> {result.pdf_path or 'book.pdf'}"
+    )
+    for advisory in build_advisories(result):
+        reporter.warn(advisory)
+    return 0
+
+
+def _latex_parts(container: Container, spec: BookSpec) -> tuple[list[int], list[int]]:
+    """Nomor bab yang sudah dikompilasi (§27), dan yang belum.
+
+    Membaca status dari record, bukan dari keberadaan berkas ``.tex``: berkas
+    dapat tertinggal dari jalankan sebelumnya, sedangkan status adalah kebenaran
+    yang tercatat §28.
+    """
+    ready: list[int] = []
+    skipped: list[int] = []
+    for number in spec.chapter_numbers():
+        record = container.state_store.load_chapter(number)
+        if record is not None and has_reached(record.status, ChapterStatus.LATEX_COMPILED):
+            ready.append(number)
+        else:
+            skipped.append(number)
+    return ready, skipped
+
+
+def _book_sources(container: Container, numbers: Sequence[int]) -> tuple[str, ...]:
+    """Seluruh sumber yang harus ada di ``references.bib`` buku (MURNI).
+
+    Gabungan sitasi buku dengan sitasi setiap draf yang ikut dirakit — bentuk
+    yang sama dengan yang dipakai gate §25 dan §26 per bab, dan sengaja memakai
+    fungsi yang sama: ``references.bib`` tingkat buku yang berbeda dari yang
+    dipakai memeriksa bab berarti bab yang lulus pemeriksaan dapat kehilangan
+    entrinya saat dirakit.
+    """
+    book = container.state_store.load_book()
+    book_sources = tuple(book.citations.values()) if book is not None else ()
+    draft_sources: list[str] = []
+    for number in numbers:
+        record = container.state_store.load_chapter(number)
+        if record is not None and record.draft is not None:
+            draft_sources.extend(record.draft.citations)
+    return bibliography_sources(book_sources, draft_sources)
 
 
 def _export_parts(

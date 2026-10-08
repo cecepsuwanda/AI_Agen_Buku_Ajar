@@ -23,7 +23,7 @@ from domain.chapter import ReviewVerdict
 from domain.errors import ConfigError
 from domain.structured import strict_schema
 
-#: Keduabelas prompt yang menjadi kontrak build ini. Daftarnya sengaja literal:
+#: Ketigabelas prompt yang menjadi kontrak build ini. Daftarnya sengaja literal:
 #: menambah prompt baru harus menuntut keputusan sadar di sini, bukan lolos
 #: diam-diam.
 EXPECTED_PROMPTS = (
@@ -32,6 +32,7 @@ EXPECTED_PROMPTS = (
     "exercise.chapter",
     "factcheck.chapter",
     "latex.chapter",
+    "latex.repair",
     "ocr.page",
     "planner.book",
     "planner.chapter",
@@ -61,7 +62,7 @@ def test_every_prompt_declares_a_known_output_model(
 def test_all_prompts_render_with_full_context(
     prompt_library: FilePromptLibrary, prompt_contexts: dict[str, dict[str, Any]]
 ) -> None:
-    """Keduabelas prompt render tanpa kesalahan dengan konteks lengkap."""
+    """Ketigabelas prompt render tanpa kesalahan dengan konteks lengkap."""
     for name in EXPECTED_PROMPTS:
         rendered = prompt_library.render(name, prompt_contexts[name])
         assert rendered.name == name

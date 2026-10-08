@@ -94,6 +94,22 @@ def can_advance(source: ChapterStatus, target: ChapterStatus) -> bool:
     return _CHAIN_INDEX[target] > _CHAIN_INDEX[source]
 
 
+def has_reached(status: ChapterStatus, milestone: ChapterStatus) -> bool:
+    """True bila ``status`` sudah berada di ``milestone`` atau melewatinya (MURNI).
+
+    Bukan kebalikan :func:`can_advance`, meski bentuknya mirip. ``can_advance``
+    menjawab "bolehkah bergerak dari sini ke sana", sedangkan yang ditanyakan di
+    sini adalah "sudah sampai mana bab ini" — dan pertanyaan itu muncul untuk
+    status yang **tidak ada di rantai sama sekali**. ``FAILED`` tidak dapat
+    bergerak ke mana pun, jadi ``can_advance`` bernilai salah untuknya, dan
+    kebalikannya akan menyatakan bab yang gagal sebagai bab yang sudah selesai
+    dikompilasi. Pemeriksaan ``status in CHAIN`` itulah bedanya.
+    """
+    if status not in _CHAIN_INDEX or milestone not in _CHAIN_INDEX:
+        return False
+    return _CHAIN_INDEX[status] >= _CHAIN_INDEX[milestone]
+
+
 def status_after_gate(
     source: ChapterStatus, produces: ChapterStatus, *, gate: str = "?"
 ) -> ChapterStatus:

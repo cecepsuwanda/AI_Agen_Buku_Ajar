@@ -144,7 +144,7 @@ def test_pass_through_gate_marks_itself_as_skipped(book: BookState) -> None:
     Bab yang lolos tanpa pemeriksaan harus terlihat sebagai bab yang lolos tanpa
     pemeriksaan — itulah bedanya melaporkan dan menyembunyikan.
     """
-    gate = PassThroughGate(name="latex_compiled", produces=ChapterStatus.LATEX_COMPILED)
+    gate = PassThroughGate(name="pedagogy_reviewed", produces=ChapterStatus.PEDAGOGY_REVIEWED)
 
     result = gate.evaluate(ChapterRecord(number=1), book)
 
@@ -173,14 +173,16 @@ def test_placeholder_gate_produces_the_status_it_stands_for(context: GateContext
 #: agent sungguhan (Tahap 4 menggantikan ``citation_checked`` dengan
 #: ``citation_checker``, Tahap 5 menggantikan ``fact_checked`` dengan
 #: ``fact_checker``, Tahap 6 menggantikan ``latex_generated`` dengan
-#: ``latex_writer``), daftar ini harus disunting — dan suntingan itu adalah
+#: ``latex_writer``, Tahap 7 menggantikan ``latex_compiled`` dengan
+#: ``latex_qa``), daftar ini harus disunting — dan suntingan itu adalah
 #: keputusan sadar, bukan pembiaran. Menurunkannya dari ``PLACEHOLDER_GATES``
 #: justru akan menyembunyikan pergantian itu.
 #:
-#: ``latex_writer`` di sini dibangun dengan ``latex=None``, sehingga yang
-#: terpasang adalah pass-through-nya. Yang diuji oleh tes di bawah adalah
-#: **rantai**, bukan isi gate-nya; perilaku ``LatexWriterGate`` sungguhan diuji
-#: di ``tests/agent/test_latex_writer.py``.
+#: ``latex_writer`` dan ``latex_qa`` di sini dibangun dengan ``latex=None``,
+#: sehingga yang terpasang adalah pass-through keduanya. Yang diuji oleh tes di
+#: bawah adalah **rantai**, bukan isi gate-nya; perilaku ``LatexWriterGate``
+#: sungguhan diuji di ``tests/agent/test_latex_writer.py`` dan ``LatexQAGate``
+#: di ``tests/agent/test_latex_qa.py``.
 CHAIN_GATES: tuple[str, ...] = (
     "fact_checker",
     "citation_checker",
@@ -188,7 +190,7 @@ CHAIN_GATES: tuple[str, ...] = (
     "consistency_checked",
     "reviewer",
     "latex_writer",
-    "latex_compiled",
+    "latex_qa",
 )
 
 

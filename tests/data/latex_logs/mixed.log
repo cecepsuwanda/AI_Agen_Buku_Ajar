@@ -1,0 +1,21 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex)
+entering extended mode
+(probe.tex
+LaTeX2e <2023-11-01>
+(./chapters/chapter01.tex
+Chapter 1.
+LaTeX Warning: Citation `sedgewick-algorithms-9f1c2d3e' on page 1 undefined on input line 11.
+
+LaTeX Warning: Reference `sec:latihan' on page 1 undefined on input line 15.
+
+LaTeX Warning: Label `sec:bigo' multiply defined.
+
+! LaTeX Error: File `figures/graf.png' not found.
+
+Overfull \hbox (9.5pt too wide) in paragraph at lines 22--23
+Overfull \vbox (3.2pt too high) has occurred while \output is active
+LaTeX Warning: There were undefined references.
+Package hyperref Warning: Token not allowed in a PDF string.
+
+[1] (./probe.aux)
+Transcript written on probe.log.

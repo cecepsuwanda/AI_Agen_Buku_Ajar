@@ -30,7 +30,14 @@ from typing import Callable
 from domain.chapter import ChapterRecord, ReviewResult
 from domain.enums import ChapterStatus
 from domain.errors import ConfigError, InvalidGateError
-from domain.ports import LatexArtifacts, ModelProvider, PromptLibrary, Reporter, ReviewGate
+from domain.ports import (
+    LatexArtifacts,
+    LatexCompiler,
+    ModelProvider,
+    PromptLibrary,
+    Reporter,
+    ReviewGate,
+)
 from domain.rules import validate_gates
 from domain.state import BookState
 
@@ -73,6 +80,21 @@ class GateContext:
     #: hilang: bab yang melewati tahap ini tanpa dikerjakan harus terlihat
     #: melewatinya, sama seperti tahap yang belum berpenghuni.
     latex: LatexArtifacts | None = None
+
+    #: Perkakas kompilasi LaTeX (§26), atau ``None`` bila tidak ada.
+    #:
+    #: Dependensi gate kedua yang menyentuh mesin ini, dan ia dipisahkan dari
+    #: ``latex`` meski keduanya berbicara tentang LaTeX: yang satu menulis
+    #: berkas, yang lain menjalankan program. Composition root memutuskan
+    #: keduanya secara terpisah, karena keduanya memang dapat gagal secara
+    #: terpisah — direktori keluaran selalu dapat ditulis, sedangkan ``latexmk``
+    #: belum tentu terpasang.
+    #:
+    #: ``None`` berarti gate §26 mengembalikan pass-through: sumber LaTeX-nya
+    #: tetap ditulis, tetapi tidak ada yang mengompilasinya. Yang memutuskannya
+    #: adalah composition root — ``latexmk`` yang diperiksa langsung oleh gate
+    #: adalah gate yang tidak dapat diuji tanpa mesin ini.
+    compiler: LatexCompiler | None = None
 
 
 #: Pembuat gate dari konteksnya.
@@ -218,11 +240,11 @@ def _passthrough_factory(name: str, produces: ChapterStatus) -> GateFactory:
 #: pembiaran. Yang pertama menjalaninya adalah ``citation_checked``, yang
 #: digantikan ``citation_checker`` pada Tahap 4 (§22); yang kedua
 #: ``fact_checked``, digantikan ``fact_checker`` pada Tahap 5 (§21); yang ketiga
-#: ``latex_generated``, digantikan ``latex_writer`` pada Tahap 6 (§25).
+#: ``latex_generated``, digantikan ``latex_writer`` pada Tahap 6 (§25); yang
+#: keempat ``latex_compiled``, digantikan ``latex_qa`` pada Tahap 7 (§26).
 PLACEHOLDER_GATES: tuple[tuple[str, ChapterStatus], ...] = (
     ("pedagogy_reviewed", ChapterStatus.PEDAGOGY_REVIEWED),
     ("consistency_checked", ChapterStatus.CONSISTENCY_CHECKED),
-    ("latex_compiled", ChapterStatus.LATEX_COMPILED),
 )
 
 
