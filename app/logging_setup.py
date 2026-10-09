@@ -47,6 +47,12 @@ def chapter_entry(record: ChapterRecord) -> dict[str, Any]:
                 "approved": review.approved,
                 "score": review.score,
                 "skipped": review.skipped,
+                # Ikut dicatat karena tanpa ia, bab yang berhenti menunggu
+                # keputusan manusia (§44) tidak dapat dibedakan di dalam log dari
+                # bab yang ditolak gate — keduanya tampil sebagai
+                # ``approved: false``, padahal yang diminta keduanya berbeda:
+                # yang satu perbaikan, yang lain pembaca.
+                "blocked": review.blocked,
             }
             for review in record.reviews
         ],
@@ -79,6 +85,7 @@ def run_record(
         "approved": report.approved,
         "failed": report.failed,
         "skipped": report.skipped,
+        "pending": report.pending,
         "exit_code": report.exit_code(),
         "aborted": report.aborted,
         "abort_reason": report.abort_reason,

@@ -21,12 +21,15 @@ tahu apa itu gate, prompt, atau model.
 
 from __future__ import annotations
 
+import shutil
+import string
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
 from rich.table import Table
 
+from agents.reviewer import ChapterReviewer
 from app.config import AppConfig, parse_overrides
 from app.container import Container, build_console_reporter, build_container
 from app.logging_setup import append_run_log, run_record
@@ -43,6 +46,7 @@ from domain.errors import (
     InputError,
     ServiceUnavailableError,
     StateCorruptError,
+    UnknownRoleError,
 )
 from domain.graph import (
     ConceptGraph,
@@ -53,14 +57,16 @@ from domain.graph import (
 from domain.latex import bibliography_sources, build_advisories, build_problems
 from domain.rendering import render_book_markdown, render_chapter_markdown
 from domain.rps import CoursePlan, render_course_plan
+from domain.rules import awaiting_approval
 from domain.state import RunReport
 from domain.transitions import has_reached
 from graph.knowledge_graph import JsonGraphStore, graph_from_directories
 from ingestion.document_normalizer import normalize_documents
 from ingestion.loader import IngestedFile, OcrRoute, load_reference_files
 from ingestion.rps_loader import parse_rps
-from latex.compiler import LatexmkCompiler
+from latex.compiler import LatexToolchainCompiler
 from memory.project_state import BOOK_FILENAME
+from models.call_log import CallTotals, call_totals, digest, read_call_log
 from models.ollama_client import list_installed_models, probe_model
 from rag.chunker import chunk_documents
 
@@ -74,6 +80,32 @@ NON_CHAT_ROLES: frozenset[str] = frozenset({"embedding"})
 #: normal — bukan kegagalan. Probe yang terlalu ketat akan melaporkan model
 #: lokal yang sehat sebagai rusak.
 PROBE_TIMEOUT_S = 180.0
+
+
+def parse_gate_names(spec: str) -> tuple[str, ...]:
+    """Parse ``--gates contoh,latihan,reviewer`` menjadi nama gate (MURNI).
+
+    Dipisah koma alih-alih satu flag per gate, dengan alasan yang sama seperti
+    ``--set-model``: rantai gate adalah **daftar berurutan**, dan menuliskannya
+    sebagai daftar membuat urutannya terlihat di baris perintah. Urutan itu
+    penting — gate yang ``produces``-nya sudah terlewati akan di-skip tanpa
+    suara — jadi bentuk yang menyembunyikannya akan menjadi jebakan.
+
+    Nama kosong dibuang, bukan diterima: ``--gates reviewer,`` adalah salah
+    ketik, dan menerimanya berarti menjalankan rantai yang berbeda dari yang
+    tertulis.
+
+    :raises ConfigError: bila hasilnya kosong — rantai tanpa gate tidak menulis
+        apa pun, dan itu selalu keliru. Untuk menjalankan tanpa gate, hapus
+        saja flag-nya dan sunting ``pipeline.gates``.
+    """
+    names = tuple(name.strip() for name in spec.split(",") if name.strip())
+    if not names:
+        raise ConfigError(
+            f"--gates {spec!r} tidak memuat satu pun nama gate. "
+            f"Contoh: --gates reviewer"
+        )
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +174,23 @@ class RunParams:
     # -- perilaku ----------------------------------------------------------
     force: bool = False
     dry_run: bool = False
+    #: ``--gates a,b``: persempit rantai gate untuk jalankan ini (§27).
+    #:
+    #: ``None`` berarti rantai dari ``config.yaml``. Dipakai untuk menekan biaya
+    #: token saat menelusuri satu bagian: rantai penuh berisi sembilan gate, dan
+    #: setiap revisi menjalankannya ulang.
+    #:
+    #: Disimpan sebagai **teks apa adanya**, bukan hasil parse, mengikuti
+    #: ``GlobalOptions.set_model``: parsing yang melempar harus terjadi di dalam
+    #: penjagaan kesalahan, dan ``_params`` berjalan sebelum penjagaan itu.
+    gates: str | None = None
+
+    def gate_names(self) -> tuple[str, ...] | None:
+        """Rantai gate yang diminta di baris perintah, bila ada.
+
+        :raises ConfigError: bila ``--gates`` tidak memuat satu pun nama.
+        """
+        return parse_gate_names(self.gates) if self.gates is not None else None
     #: ``export --latex``: rakit dan kompilasi buku LaTeX (§42).
     #:
     #: Berlaku pada ``export`` saja. Pada perintah lain ia tidak berpengaruh —
@@ -499,6 +548,7 @@ def open_container(params: RunParams, reporter: RichReporter) -> Container:
         output_dir=params.output,
         dry_run=params.dry_run,
         max_revisions=params.max_revisions,
+        gates=params.gate_names(),
         verbose=params.globals.verbose,
     )
 
@@ -711,6 +761,46 @@ def _write_chapter(number: int, params: RunParams, reporter: RichReporter) -> in
     warn_dry_run(reporter, params)
     container = open_container(params, reporter)
     record = container.director.run_chapter(number, force=params.force)
+    reporter.chapter_finished(record)
+    return 1 if is_problem(record.status) else 0
+
+
+# ---------------------------------------------------------------------------
+# approve / reject (§44)
+# ---------------------------------------------------------------------------
+def do_approve(number: int, params: RunParams) -> int:
+    """Setujui sebuah bab atas keputusan manusia (§44).
+
+    Perintah inilah jawaban yang ditunggu gate ``human_approval`` bila ia
+    diaktifkan. Tanpa gate itu pun ia tetap berguna: ia memastikan babnya
+    benar-benar ``APPROVED`` dan Markdown-nya ada, dan menjalankannya dua kali
+    tidak merusak apa pun.
+    """
+    reporter = build_console_reporter(verbose=params.globals.verbose)
+    return guarded(reporter, lambda: _approve(number, params, reporter))
+
+
+def _approve(number: int, params: RunParams, reporter: RichReporter) -> int:
+    container = open_container(params, reporter)
+    record = container.director.approve(number)
+    reporter.chapter_finished(record)
+    return 0
+
+
+def do_reject(number: int, params: RunParams, *, reason: str = "") -> int:
+    """Kembalikan sebuah bab ke penulis atas keputusan manusia (§44).
+
+    Berguna justru ketika gate §44 mati: bab yang sudah ``APPROVED`` tidak lagi
+    dilewati gate mana pun, sehingga tidak ada jalur otomatis yang dapat
+    mengembalikannya ke penulis.
+    """
+    reporter = build_console_reporter(verbose=params.globals.verbose)
+    return guarded(reporter, lambda: _reject(number, params, reporter, reason=reason))
+
+
+def _reject(number: int, params: RunParams, reporter: RichReporter, *, reason: str) -> int:
+    container = open_container(params, reporter)
+    record = container.director.reject(number, reason=reason)
     reporter.chapter_finished(record)
     return 1 if is_problem(record.status) else 0
 
@@ -1020,7 +1110,13 @@ def _status_row(
         return (str(number), title, "[dim]belum dikerjakan[/dim]", "-", "-")
 
     last = record.last_review()
-    verdict = "-" if last is None else f"{last.gate}: {'lulus' if last.approved else 'tolak'}"
+    if last is None:
+        verdict = "-"
+    elif last.blocked:
+        # "tolak" akan menyalahkan bab yang tidak melakukan kesalahan apa pun.
+        verdict = f"{last.gate}: menunggu"
+    else:
+        verdict = f"{last.gate}: {'lulus' if last.approved else 'tolak'}"
     status = f"[red]{record.status}[/red]" if is_problem(record.status) else str(record.status)
     return (str(number), title, status, str(record.revision), verdict)
 
@@ -1084,7 +1180,7 @@ def _export_latex(container: Container, reporter: RichReporter, spec: BookSpec) 
     :returns: kode keluar perintah.
     """
     compiler = container.latex_compiler
-    if not isinstance(compiler, LatexmkCompiler):
+    if not isinstance(compiler, LatexToolchainCompiler):
         reporter.console.print(
             "Perkakas LaTeX tidak tersedia, jadi buku LaTeX tidak dapat dirakit. "
             "Periksa `latex.enabled` dan `latex.engine` di konfigurasi, atau "
@@ -1196,7 +1292,8 @@ def _print_run_report(reporter: RichReporter, report: RunReport, params: RunPara
     """Cetak ringkasan akhir satu kali ``run`` (§35)."""
     reporter.console.print(
         f"\n[bold]{report.approved} dari {report.total} bab disetujui.[/bold] "
-        f"Gagal: {report.failed}. Dilewati: {report.skipped}."
+        f"Gagal: {report.failed}. Menunggu persetujuan: {report.pending}. "
+        f"Dilewati: {report.skipped}."
     )
 
     if report.aborted:
@@ -1210,6 +1307,14 @@ def _print_run_report(reporter: RichReporter, report: RunReport, params: RunPara
         if is_problem(record.status):
             reporter.console.print(
                 f"  [red]bab {record.number}[/red]: {record.error or _last_feedback(record)}"
+            )
+
+    for record in report.records:
+        if awaiting_approval(record):
+            reporter.console.print(
+                f"  [yellow]bab {record.number}[/yellow]: selesai dikerjakan, menunggu "
+                f"persetujuan - jalankan 'approve {record.number}' atau "
+                f"'reject {record.number} --reason \"...\"'."
             )
 
     if params.dry_run:
@@ -1258,28 +1363,406 @@ def _write_run_log(
         reporter.warn(f"Gagal menulis log JSONL ke {container.paths.run_log}.")
 
 
+# ---------------------------------------------------------------------------
+# compare (§33)
+# ---------------------------------------------------------------------------
+#: Peran yang dibandingkan bila ``--role`` tidak diberikan. Penulis adalah peran
+#: yang paling sering dipertanyakan mutunya, dan yang paling mahal tokennya.
+DEFAULT_COMPARE_ROLE = "writer"
+
+#: Direktori hasil perbandingan, di bawah ``state/`` dan ``output/``.
+COMPARE_DIRNAME = "compare"
+
+#: Karakter yang aman dipakai sebagai nama direktori di sistem berkas mana pun.
+_SAFE_CHARS = frozenset(string.ascii_letters + string.digits + "._-")
+
+
+@dataclass(frozen=True, slots=True)
+class CompareParams:
+    """Parameter perintah ``compare`` (§33).
+
+    ``run`` dibawa **utuh**, bukan disalin field per field. ``compare``
+    menjalankan bab yang sama seperti ``run``, dengan flag yang sama, pada buku
+    yang sama — dan dua kelas parameter yang mirip adalah cara paling andal
+    membuat keduanya perlahan menyimpang. Yang ditambahkan di sini hanyalah dua
+    hal yang memang hanya dimiliki perintah ini: peran yang dibandingkan, dan
+    daftar modelnya.
+    """
+
+    run: RunParams = field(default_factory=RunParams)
+    role: str = DEFAULT_COMPARE_ROLE
+    models: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ModelTrial:
+    """Hasil satu bab yang dikerjakan satu model pada satu peran (§33).
+
+    ``ok`` sengaja **tidak** berarti "skornya bagus": ia berarti babnya selesai
+    tanpa kegagalan. Skornya tetap dilaporkan apa adanya, karena model yang
+    menyelesaikan bab dengan mutu rendah adalah temuan yang dicari perbandingan
+    ini — bukan alasan untuk menyembunyikan barisnya.
+    """
+
+    model: str
+    ok: bool
+    status: str = ""
+    score: int = 0
+    revisions: int = 0
+    calls: int = 0
+    prompt_tokens: int = 0
+    output_tokens: int = 0
+    seconds: float = 0.0
+    #: Baris catatan yang tidak terbaca. Lihat :class:`~models.call_log.CallTotals`.
+    unreadable: int = 0
+    #: Keterangan kegagalan, bila modelnya tidak menyelesaikan babnya.
+    note: str = ""
+
+    @property
+    def tokens(self) -> int:
+        """Seluruh token yang dibayar model ini — masuk maupun keluar."""
+        return self.prompt_tokens + self.output_tokens
+
+
+def parse_model_list(spec: str) -> tuple[str, ...]:
+    """Parse ``--models a,b,c`` menjadi nama model, urut dan tanpa duplikat (MURNI).
+
+    Yang diketik terakhir tidak menang dan yang pertama tidak kalah: sebuah nama
+    yang disebut dua kali adalah satu model, dan menampilkannya dua kali akan
+    membuat tabelnya terbaca seolah dua model diuji.
+    """
+    seen: dict[str, None] = {}
+    for part in spec.split(","):
+        name = part.strip()
+        if name:
+            seen.setdefault(name, None)
+    return tuple(seen)
+
+
+def compare_slug(model: str) -> str:
+    """Nama direktori untuk satu nama model (MURNI).
+
+    Nama model memuat ``:`` dan ``/`` (``gemma4:31b-cloud``, ``library/x``), dan
+    keduanya tidak sah di nama direktori Windows. Karena itu karakter di luar
+    daftar aman diganti tanda hubung — tetapi penggantian itu **tidak
+    bijektif**: ``a:b`` dan ``a-b`` menghasilkan slug yang sama, dan dua model
+    yang berbagi satu direktori akan saling menimpa catatannya tanpa gejala apa
+    pun. Sidik jari pendek di ujungnya menutup celah itu; yang dibaca manusia
+    tetap nama modelnya di tabel, bukan nama direktorinya.
+    """
+    safe = "".join(char if char in _SAFE_CHARS else "-" for char in model).strip("-")
+    return f"{safe or 'model'}-{digest(model)[:8]}"
+
+
+def final_score(record: ChapterRecord) -> int:
+    """Skor vonis **peninjau** terakhir, atau ``0`` bila peninjau belum berjalan (MURNI).
+
+    Bukan ``record.reviews[-1]``, dan itu bukan detail sepele: pemeriksa sitasi,
+    fakta, pedagogi, dan konsistensi menulis vonisnya ke daftar yang sama, dan
+    vonis mereka bernilai nol — yang mereka laporkan adalah temuan, bukan mutu.
+    Bab yang sempurna karena itu akan terbaca berskor nol bila vonis terakhir
+    yang dibaca kebetulan vonis seorang pemeriksa.
+    """
+    for review in reversed(record.reviews):
+        if review.gate == ChapterReviewer.name and not review.skipped:
+            return review.score
+    return 0
+
+
+def do_compare(params: CompareParams) -> int:
+    """Bandingkan beberapa model pada tugas yang sama (§33)."""
+    reporter = build_console_reporter(verbose=params.run.globals.verbose)
+    return guarded(reporter, lambda: _compare(params, reporter))
+
+
+def _compare(params: CompareParams, reporter: RichReporter) -> int:
+    """Kerjakan satu bab sekali per model, lalu sajikan angkanya berdampingan.
+
+    Tugasnya disamakan dengan cara yang paling tegas yang tersedia: **rencana
+    buku yang sama**, bab yang sama, dan konfigurasi yang sama kecuali satu
+    peran. Tiap model mendapat ``state/`` dan ``output/`` sendiri — bukan karena
+    kerapian, melainkan karena jalankan kedua pada direktori yang sama akan
+    menemukan babnya sudah ``APPROVED`` lalu melewatinya, dan tabelnya akan
+    memuat satu jalankan sungguhan di sebelah beberapa jalankan kosong.
+    """
+    if not params.models:
+        raise ConfigError(
+            "compare butuh daftar model. Contoh: "
+            "ai-book compare --role writer --models gemma4:31b-cloud,gpt-oss:120b-cloud"
+        )
+
+    if params.run.dry_run:
+        reporter.warn(
+            "dry-run: jawaban model disintesis dari skema, sehingga setiap model "
+            "menghasilkan bab yang sama. Yang dibuktikan di sini adalah jalurnya, "
+            "bukan mutunya."
+        )
+
+    base = open_container(params.run, reporter)
+    spec = _ensure_planned(params.run, reporter, base)
+
+    role = params.role
+    if role not in base.registry.roles:
+        raise UnknownRoleError(role, tuple(sorted(base.registry.roles)))
+
+    numbers = spec.chapter_numbers()
+    number = params.run.chapter if params.run.chapter is not None else min(numbers, default=1)
+    if number not in numbers:
+        raise ChapterNotPlannedError(number, numbers)
+
+    reporter.info(
+        f"Bab {number} dikerjakan {len(params.models)} kali pada peran {role!r}, "
+        "satu kali per model."
+    )
+    trials = tuple(
+        _run_trial(base, params, reporter, role=role, model=model, number=number)
+        for model in params.models
+    )
+    _print_comparison(
+        reporter,
+        role=role,
+        number=number,
+        trials=trials,
+        state_root=base.paths.state / COMPARE_DIRNAME,
+        output_root=base.paths.output / COMPARE_DIRNAME,
+    )
+    return 0 if any(trial.ok for trial in trials) else 1
+
+
+def _run_trial(
+    base: Container,
+    params: CompareParams,
+    reporter: RichReporter,
+    *,
+    role: str,
+    model: str,
+    number: int,
+) -> ModelTrial:
+    """Kerjakan bab ``number`` sekali dengan ``model`` pada peran ``role`` (§33)."""
+    slug = compare_slug(model)
+    state_dir = base.paths.state / COMPARE_DIRNAME / slug
+    output_dir = base.paths.output / COMPARE_DIRNAME / slug
+
+    try:
+        _reset_dir(state_dir)
+        _reset_dir(output_dir)
+        _seed_plan(base, state_dir)
+        container = build_container(
+            config_path=params.run.globals.config_path,
+            profile=params.run.globals.profile,
+            # Override peran yang dibandingkan menang atas --set-model, dan itu
+            # disengaja: membandingkan model yang diminta adalah satu-satunya
+            # pekerjaan perintah ini.
+            overrides={**params.run.globals.overrides(), role: model},
+            reporter=reporter,
+            output_dir=output_dir,
+            state_dir=state_dir,
+            dry_run=params.run.dry_run,
+            max_revisions=params.run.max_revisions,
+            verbose=params.run.globals.verbose,
+        )
+        record = container.director.run_chapter(number, force=True)
+        totals = read_trial_calls(container.paths.call_logs_dir, role)
+    except BukuAjarError as exc:
+        # Satu model yang tidak dapat dijalankan **tidak** membatalkan
+        # perbandingannya: "model ini tidak bekerja" adalah salah satu jawaban
+        # yang dicari, dan menghentikan seluruh perintah karenanya akan
+        # menyembunyikan jawaban model-model yang sudah berhasil.
+        return ModelTrial(model=model, ok=False, note=str(exc))
+
+    return ModelTrial(
+        model=model,
+        ok=not is_problem(record.status),
+        status=str(record.status),
+        score=final_score(record),
+        revisions=record.revision,
+        calls=totals.calls,
+        prompt_tokens=totals.prompt_tokens,
+        output_tokens=totals.output_tokens,
+        seconds=totals.seconds,
+        unreadable=totals.unreadable,
+        note=record.error or "",
+    )
+
+
+def read_trial_calls(directory: Path, role: str) -> CallTotals:
+    """Angka catatan panggilan peran ``role`` di ``directory`` (§33, §38)."""
+    return call_totals(read_call_log(directory, role))
+
+
+def _reset_dir(path: Path) -> None:
+    """Kosongkan ``path`` lalu buat kembali.
+
+    Hasil model sebelumnya tidak boleh bercampur dengan yang baru: catatan §38
+    ditulis *append*, sehingga menjalankan perbandingan dua kali akan
+    menggandakan jumlah panggilannya — dan tabel yang membengkak tanpa
+    sebabnya adalah tabel yang salah.
+    """
+    shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _seed_plan(base: Container, state_dir: Path) -> None:
+    """Salin ``state/book.json`` ke state percobaan, sehingga babnya punya rencana.
+
+    Yang disalin **hanya** rencananya, bukan record babnya — persis seperti
+    sandbox ``--dry-run`` (§28). Setiap model harus mengerjakan babnya dari
+    awal; memberi mereka pekerjaan yang sudah setengah jadi milik model lain
+    akan membandingkan sesuatu yang bukan tugas itu.
+    """
+    source = base.paths.state / BOOK_FILENAME
+    if source.is_file():
+        shutil.copy2(source, state_dir / BOOK_FILENAME)
+
+
+def _print_comparison(
+    reporter: RichReporter,
+    *,
+    role: str,
+    number: int,
+    trials: Sequence[ModelTrial],
+    state_root: Path,
+    output_root: Path,
+) -> None:
+    """Sajikan hasil perbandingan sebagai satu tabel (§33)."""
+    table = Table(
+        title=f"Perbandingan model pada peran {role!r}, bab {number} (§33)",
+        header_style="bold",
+        box=None,
+    )
+    table.add_column("model")
+    table.add_column("status")
+    table.add_column("skor", justify="right")
+    table.add_column("revisi", justify="right")
+    table.add_column("panggilan", justify="right")
+    table.add_column("token", justify="right")
+    table.add_column("detik", justify="right")
+    table.add_column("catatan")
+
+    for trial in trials:
+        status = trial.status or ("gagal" if not trial.ok else "-")
+        style = "red" if is_problem_str(status) else "green"
+        table.add_row(
+            trial.model,
+            f"[{style}]{status}[/{style}]",
+            f"{trial.score}/10" if trial.ok else "-",
+            str(trial.revisions) if trial.ok else "-",
+            str(trial.calls),
+            str(trial.tokens),
+            f"{trial.seconds:.1f}",
+            trial.note,
+        )
+
+    reporter.console.print(table)
+
+    for trial in trials:
+        if trial.unreadable:
+            reporter.warn(
+                f"{trial.model}: {trial.unreadable} baris catatan tidak terbaca, "
+                "sehingga angka panggilan dan tokennya kurang dari yang sebenarnya."
+            )
+
+    winners = _winners(trials)
+    if len(winners) == 1:
+        best = winners[0]
+        reporter.console.print(
+            f"[bold]Skor tertinggi:[/bold] {best.model} ({best.score}/10, "
+            f"{best.tokens} token, {best.seconds:.1f} detik)."
+        )
+    elif winners:
+        names = ", ".join(trial.model for trial in winners)
+        reporter.console.print(
+            f"[bold]Skor tertinggi:[/bold] {winners[0].score}/10 — seri antara {names}."
+        )
+    else:
+        reporter.console.print(
+            "[yellow]Tidak ada model yang menyelesaikan bab ini dengan skor peninjau.[/yellow] "
+            "Periksa kolom catatan."
+        )
+
+    reporter.console.print(
+        f"[dim]Hasil tiap model tersimpan di {display_path(state_root)}/<slug>/ dan "
+        f"{display_path(output_root)}/<slug>/, dengan catatan panggilan lengkapnya di "
+        f"{display_path(output_root)}/<slug>/logs/{role}.jsonl.[/dim]"
+    )
+
+
+def display_path(path: Path) -> str:
+    """Jalur untuk dibaca manusia: relatif bila berada di bawah direktori kerja (MURNI).
+
+    Bukan hiasan: pada ``--dry-run`` akar hasilnya berpindah ke dalam sandbox,
+    dan pesan yang tetap menyebut ``state/compare/`` akan menunjuk ke direktori
+    yang tidak memuat apa pun.
+    """
+    try:
+        return path.relative_to(Path.cwd()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _winners(trials: Sequence[ModelTrial]) -> tuple[ModelTrial, ...]:
+    """Model berskor tertinggi di antara yang berhasil (MURNI).
+
+    Skor nol tidak pernah menang: ia berarti peninjau belum memberikan vonis
+    berskor — bukan bahwa babnya sempurna maupun bahwa babnya terburuk.
+    """
+    scored = [trial for trial in trials if trial.ok and trial.score > 0]
+    if not scored:
+        return ()
+    best = max(trial.score for trial in scored)
+    return tuple(trial for trial in scored if trial.score == best)
+
+
+def is_problem_str(status: str) -> bool:
+    """``True`` bila ``status`` adalah status yang bermasalah (MURNI).
+
+    Tabel ini menerima status sebagai ``str`` — nilainya datang dari
+    ``ChapterRecord`` yang telah dibaca dan dicatat apa adanya — sehingga
+    perbandingannya dilakukan di sini alih-alih memaksa pemanggil mengubahnya
+    kembali menjadi enum.
+    """
+    try:
+        return is_problem(ChapterStatus(status))
+    except ValueError:
+        return False
+
+
 __all__ = [
+    "COMPARE_DIRNAME",
+    "DEFAULT_COMPARE_ROLE",
     "NON_CHAT_ROLES",
     "PROBE_TIMEOUT_S",
+    "CompareParams",
     "DoctorParams",
     "DoctorReport",
     "GlobalOptions",
+    "ModelTrial",
     "RoleCheck",
     "RpsInput",
     "RunParams",
     "build_request",
+    "compare_slug",
+    "do_approve",
+    "do_compare",
     "do_doctor",
     "do_export",
     "do_ingest",
     "do_plan",
+    "do_reject",
     "do_run",
     "do_status",
     "do_write_chapter",
+    "display_path",
+    "final_score",
     "guarded",
+    "is_problem_str",
     "load_spec",
     "open_container",
+    "parse_gate_names",
+    "parse_model_list",
     "read_input_file",
     "read_rps_file",
+    "read_trial_calls",
     "report_rps_notes",
     "select_chapters",
     "warn_dry_run",

@@ -41,6 +41,7 @@ from agents.context import (
     book_language,
     book_title,
     evidence_lines,
+    evidence_ref,
     summaries_before,
     terminology_lines,
 )
@@ -118,7 +119,11 @@ class RagResearcher(StructuredAgent[ResearchFindings]):
                 "previous_summaries": summaries_before(book, spec.number),
                 "terminology": terminology_lines(book),
                 "evidence": evidence_lines(evidence),
-            }
+            },
+            # §38: catatan panggilan menyebut bahan yang benar-benar diambil.
+            # Inilah satu-satunya panggilan model di pipeline yang punya daftar
+            # itu, dan karena itu satu-satunya yang mengisinya.
+            sources=tuple(evidence_ref(item) for item in evidence),
         )
 
         return ResearchPackage(

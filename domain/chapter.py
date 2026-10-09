@@ -133,6 +133,20 @@ class ReviewResult(FrozenModel):
     :func:`~domain.rules.approved_terminology`, dan hanya dari review yang
     **lulus** — glosarium bab yang ditolak belum tentu mewakili babnya yang
     sesungguhnya.
+
+    ``blocked`` adalah jawaban ketiga, dan ia ada karena dua jawaban tidak cukup.
+    Sebuah gate dapat berhenti bukan karena babnya buruk dan bukan karena babnya
+    baik, melainkan karena **yang berhak memutuskan belum memutuskan**: §44
+    menuntut persetujuan manusia sebelum sebuah bab dinyatakan final. Vonis
+    seperti itu tidak boleh dipaksa masuk ke ``approved=False`` — babnya tidak
+    ditolak dan tidak akan direvisi — dan tidak boleh juga ``approved=True``,
+    karena tidak ada yang menyetujuinya.
+
+    Konsekuensinya ditegakkan :func:`~domain.rules.with_gate_result`: vonis
+    ``blocked`` **tidak mengubah status dan tidak menambah penghitung revisi**.
+    Babnya berhenti tepat di tempatnya, dan ``run`` berikutnya akan menemukannya
+    di tempat yang sama — sampai seseorang menjalankan ``approve`` atau
+    ``reject``.
     """
 
     gate: str
@@ -140,6 +154,7 @@ class ReviewResult(FrozenModel):
     score: int = Field(default=0, ge=0, le=10)
     feedback: tuple[str, ...] = ()
     skipped: bool = False
+    blocked: bool = False
     enriched_draft: "ChapterDraft | None" = None
     terminology: Mapping[str, str] = Field(default_factory=dict)
 

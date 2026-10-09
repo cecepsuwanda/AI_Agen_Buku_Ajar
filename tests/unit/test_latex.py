@@ -27,8 +27,10 @@ import pytest
 from domain.book import ChapterSpec
 from domain.errors import ConfigError
 from domain.latex import (
+    BIBTEX_PROGRAM,
     CHAPTER_BLOCK_BEGIN,
     CHAPTER_BLOCK_END,
+    SELF_DRIVING_ENGINES,
     LatexBuildResult,
     LatexChapter,
     bibliography_entries,
@@ -45,6 +47,7 @@ from domain.latex import (
     extract_labels,
     extract_ref_keys,
     inspect_latex,
+    latex_passes,
     lock_chapter_number,
     log_excerpt,
     render_bibliography,
@@ -972,3 +975,81 @@ def test_the_shipped_template_has_the_markers_in_order() -> None:
     assert render_main_tex(template, title="X", chapter_numbers=(1, 2)).count(
         "\\include{chapters/chapter"
     ) == 2
+
+
+# ---------------------------------------------------------------------------
+# Rencana kompilasi (MURNI) — berapa kali dan dengan program apa (§25, §26)
+# ---------------------------------------------------------------------------
+# ``latex/compiler.py`` tidak lagi menuliskan sendiri argumen kompilasinya; ia
+# menjalankan langkah yang diputuskan di sini. Itu memindahkan satu-satunya
+# keputusan yang sebelumnya tidak dapat diuji tanpa memasang LaTeX — berapa kali
+# dijalankan, dan apa yang berjalan di antaranya — ke fungsi yang tidak menyentuh
+# ``subprocess`` sama sekali.
+def test_a_latex_only_document_gets_two_passes() -> None:
+    """Satu lintasan belum menyelesaikan ``\ref``; dua sudah."""
+    passes = latex_passes(engine="pdflatex", jobname="probe")
+
+    assert [step.program for step in passes] == ["pdflatex", "pdflatex"]
+    assert passes[1].note != passes[0].note
+
+
+def test_a_citing_document_gets_bibtex_between_its_passes() -> None:
+    """Rantai lengkapnya: LaTeX → BibTeX → LaTeX → LaTeX."""
+    passes = latex_passes(engine="pdflatex", jobname="main", bibliography=True)
+
+    assert [step.program for step in passes] == ["pdflatex", BIBTEX_PROGRAM, "pdflatex", "pdflatex"]
+    # BibTeX menerima nama pekerjaan tanpa ekstensi: ia yang mencari ``.aux``.
+    assert passes[1].argv == (BIBTEX_PROGRAM, "main")
+
+
+def test_the_second_pass_reads_the_bibliography_when_there_is_one() -> None:
+    """Lintasan kedua sesudah BibTeX berbeda artinya dari lintasan kedua tanpa BibTeX."""
+    without = latex_passes(engine="pdflatex", jobname="main")
+    with_bib = latex_passes(engine="pdflatex", jobname="main", bibliography=True)
+
+    assert with_bib[2].note != without[1].note
+
+
+def test_a_self_driving_engine_gets_a_single_pass() -> None:
+    """``latexmk`` tahu sendiri berapa kali ia harus diulang; menambahkan lintasan
+    kedua hanya menggandakan pekerjaannya."""
+    passes = latex_passes(engine="latexmk", jobname="main", bibliography=True)
+
+    assert len(passes) == 1
+    assert passes[0].program == "latexmk"
+
+
+def test_only_the_self_driving_engine_receives_the_pdf_flag() -> None:
+    """``-pdf`` adalah opsi ``latexmk``. ``pdflatex -pdf`` bukan opsi yang dikenal,
+    dan di MiKTeX ia menggagalkan kompilasi — jadi ia tidak boleh muncul di
+    rencana mesin lain."""
+    assert "latexmk" in SELF_DRIVING_ENGINES
+    assert "pdflatex" not in SELF_DRIVING_ENGINES
+
+    assert "-pdf" in latex_passes(engine="latexmk", jobname="main")[0].argv
+    for step in latex_passes(engine="pdflatex", jobname="main", bibliography=True):
+        assert "-pdf" not in step.argv, f"{step.program} mendapat opsi milik mesin lain"
+
+
+def test_the_jobname_reaches_the_tex_argument() -> None:
+    """Adapter menjalankan langkah ini di direktori kerjanya, tanpa jalur absolut;
+    berkas yang salah nama berarti kompilasi yang membaca dokumen yang salah."""
+    for step in latex_passes(engine="pdflatex", jobname="chapter07", bibliography=True):
+        if step.program != BIBTEX_PROGRAM:
+            assert "chapter07.tex" in step.argv
+
+
+def test_every_pass_runs_the_program_it_names() -> None:
+    """``argv[0]`` harus sama dengan ``program``: adapter menjalankan ``argv``
+    apa adanya, dan ``program`` yang dipakai ``available()`` untuk memeriksa."""
+    for engine in ("pdflatex", "latexmk", "xelatex"):
+        for step in latex_passes(engine=engine, jobname="main", bibliography=True):
+            assert step.argv[0] == step.program
+
+
+def test_a_different_bibtex_program_is_honoured() -> None:
+    """Mesin yang memasang BibTeX-nya dengan nama lain dapat memakai rencana ini."""
+    passes = latex_passes(engine="pdflatex", jobname="main", bibliography=True, bibtex="bibtex8")
+
+    assert passes[1].program == "bibtex8"
+    assert passes[1].argv[0] == "bibtex8"

@@ -114,11 +114,16 @@ class LatexConfig(FrozenModel):
     """Pembangkit & pemeriksa LaTeX (§25, §26)."""
 
     enabled: bool = True
-    #: ``latexmk`` dipakai alih-alih ``pdflatex`` langsung karena ia yang tahu
-    #: berapa kali harus dijalankan ulang: rujukan silang dan daftar pustaka baru
-    #: konvergen setelah dua-tiga lintasan, dan menjalankannya sekali menghasilkan
-    #: PDF dengan tanda tanya di tempat nomor seharusnya.
-    engine: str = "latexmk"
+    #: Mesin yang dijalankan. Berapa kali ia dipanggil — dan apakah ``bibtex``
+    #: dipanggil di antaranya — bukan urusan nilai ini melainkan
+    #: :func:`~domain.latex.latex_passes`.
+    #:
+    #: Bawaannya ``pdflatex`` karena ia ada di setiap pemasangan LaTeX. Alternatif
+    #: yang lebih pintar adalah ``latexmk``, yang tahu sendiri berapa kali harus
+    #: diulang, tetapi ia skrip Perl: tanpa ``perl`` di ``PATH`` — keadaan bawaan
+    #: PowerShell di Windows, dan Git Bash menyediakannya sendiri — ia tidak
+    #: berjalan meski berkasnya ada.
+    engine: str = "pdflatex"
     #: Direktori template. ``None`` berarti memakai template bawaan di
     #: ``latex/templates/``; argumen ``--latex-template`` (§42) mengisinya dari
     #: ``input/source_latex/``.
@@ -138,6 +143,20 @@ class GraphConfig(FrozenModel):
     #: ringkasan bab dapat memuat siklus ("A memakai B", "B dijelaskan lewat A");
     #: batas ini membuat penelusurannya berhenti dengan sendirinya.
     max_depth: int = Field(default=8, ge=1, le=50)
+
+
+class LoggingConfig(FrozenModel):
+    """Catatan per panggilan model, dipisah per peran (§38)."""
+
+    enabled: bool = True
+    #: Berapa karakter keluaran model yang disimpan apa adanya di setiap baris.
+    #:
+    #: ``0`` berarti tidak menyimpan keluaran sama sekali; itu tetap sah untuk
+    #: orang yang hanya ingin angka lama dan tokennya. Bawaannya menyimpan
+    #: sebagian, bukan seluruhnya: satu draf bab adalah puluhan ribu karakter,
+    #: dan delapan bab dengan tiga revisi akan menulis berkas yang lebih besar
+    #: daripada bukunya sendiri.
+    output_chars: int = Field(default=4000, ge=0)
 
 
 class PathsConfig(FrozenModel):
@@ -166,6 +185,7 @@ class AppConfig(FrozenModel):
     rag: RagConfig = Field(default_factory=RagConfig)
     latex: LatexConfig = Field(default_factory=LatexConfig)
     graph: GraphConfig = Field(default_factory=GraphConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     #: Bahan mentah ``profiles`` — diteruskan apa adanya ke
     #: :meth:`models.model_registry.ModelRegistry.from_sources`, yang memegang

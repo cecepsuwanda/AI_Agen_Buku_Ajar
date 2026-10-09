@@ -19,7 +19,7 @@ import shutil
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 if TYPE_CHECKING:
     from tenacity import Retrying
@@ -54,13 +54,14 @@ from domain.ports import (
     StateStore,
 )
 from latex.artifacts import FileLatexArtifacts
-from latex.compiler import LatexmkCompiler
+from latex.compiler import LatexToolchainCompiler
 from latex.dry_run import DryRunLatexCompiler
 from memory.artifacts import MarkdownArtifacts
 from memory.project_state import BOOK_FILENAME, JsonStateStore
+from models.call_log import CallLoggingModelSource
 from models.dry_run import DryRunChatModel
 from models.model_registry import ModelRegistry
-from models.model_router import ModelRouter
+from models.model_router import ChatModelSource, ModelRouter
 from models.ollama_client import ChatModelFactory, build_retry
 from rag.embeddings import BatchingEmbedder
 from rag.retriever import VectorRetriever
@@ -176,6 +177,18 @@ class ProjectPaths:
         """Log JSONL perjalanan (§38)."""
         return self.state / "run.jsonl"
 
+    @property
+    def call_logs_dir(self) -> Path:
+        """Catatan per panggilan model, satu berkas per peran (§38).
+
+        Di ``output/`` dan bukan di ``state/``: ``state/`` menyimpan keputusan
+        buku — record bab dan rencananya — sedangkan ini menyimpan jejak
+        panggilan yang menghasilkannya. Bedanya terlihat saat keduanya harus
+        dibuang: menghapus ``state/`` berarti membuang pekerjaan, menghapus
+        catatannya hanya berarti kehilangan kemampuan membandingkan model (§33).
+        """
+        return self.output / "logs"
+
     @classmethod
     def from_config(cls, root: Path, paths: PathsConfig) -> "ProjectPaths":
         """Bangun dari blok ``paths:`` konfigurasi (MURNI — tanpa menyentuh disk)."""
@@ -267,6 +280,7 @@ class ProjectPaths:
             self.chapters_dir,
             self.latex_chapters_dir,
             self.figures_dir,
+            self.call_logs_dir,
             self.vector_store_dir,
             self.graph_dir,
         ):
@@ -503,13 +517,16 @@ def build_latex_compiler(
        gate §26 menjadi pass-through. Buku tanpa kompilasi tetap buku; yang tidak
        boleh terjadi adalah bab yang diklaim terkkompilasi padahal tidak ada yang
        mengompilasinya.
-    3. **Ada** → :class:`~latex.compiler.LatexmkCompiler`.
+    3. **Ada** → :class:`~latex.compiler.LatexToolchainCompiler`.
 
-    "Tidak dapat dijalankan" bukan "tidak ada di ``PATH``": ``latexmk`` di
-    MiKTeX adalah shim yang menuntut ``perl``, dan tanpa ``perl`` shim-nya tetap
-    ada sementara setiap pemanggilannya gagal. Pemeriksaannya karena itu
+    "Tidak dapat dijalankan" bukan "tidak ada di ``PATH``", dan yang diperiksa
+    adalah **seluruh** program yang akan dijalankan rencana kompilasi — bukan
+    hanya mesinnya. ``latexmk`` di MiKTeX adalah shim yang menuntut ``perl``, dan
+    tanpa ``perl`` shim-nya tetap ada sementara setiap pemanggilannya gagal;
+    pada mesin tanpa ``bibtex``, kompilasi yang tidak diperiksa lebih dulu akan
+    menolak setiap bab dengan alasan yang salah. Pemeriksaannya karena itu
     dijalankan sekali di mesin ini — lihat
-    :meth:`~latex.compiler.LatexmkCompiler.available`.
+    :meth:`~latex.compiler.LatexToolchainCompiler.available`.
 
     Pemeriksaan itu ada di sini, bukan di dalam gate, karena hanya composition
     root yang boleh tahu tentang mesin ini — dan gate yang memeriksanya sendiri
@@ -519,7 +536,7 @@ def build_latex_compiler(
         return None
     if dry_run:
         return DryRunLatexCompiler()
-    compiler = LatexmkCompiler(
+    compiler = LatexToolchainCompiler(
         paths.latex_dir,
         engine=config.latex.engine,
         timeout_s=config.latex.timeout_s,
@@ -570,8 +587,10 @@ def build_container(
     chat_override: ChatModel | None = None,
     prompt_library: PromptLibrary | None = None,
     output_dir: Path | None = None,
+    state_dir: Path | None = None,
     dry_run: bool = False,
     max_revisions: int | None = None,
+    gates: Sequence[str] | None = None,
     verbose: bool = False,
 ) -> Container:
     """Rakit seluruh graf objek aplikasi.
@@ -587,6 +606,13 @@ def build_container(
         **sebelum** artefak dibangun, karena :class:`~memory.artifacts.MarkdownArtifacts`
         menyimpan direktorinya saat konstruksi; menimpanya setelah itu tidak
         berpengaruh.
+    :param state_dir: direktori ``state/`` pengganti. Dipakai ``compare`` (§33),
+        yang mengerjakan bab yang sama beberapa kali dalam satu proses dan
+        karena itu menuntut tiap jalankan punya state sendiri-sendiri — tanpa
+        itu, jalankan kedua menemukan babnya sudah ``APPROVED`` lalu
+        melewatinya. ``paths.sandbox`` ikut berpindah ke dalamnya: ia memang
+        milik state-nya, dan prompt ``--dry-run`` yang ditulis ke sandbox
+        sungguhan akan menumpahkan berkas ke ``state/`` repo.
     :param dry_run: ``--dry-run``. Menukar adapter chat dengan
         :class:`~models.dry_run.DryRunChatModel`, yang menulis prompt ke
         ``state/dryrun/`` dan tidak membuka soket. Dibuat **di sini**, bukan oleh
@@ -597,6 +623,12 @@ def build_container(
         mode ini — dan itu disengaja.
     :param max_revisions: ``--max-revisions``. ``None`` berarti angkanya diambil
         dari ``config.yaml``.
+    :param gates: ``--gates``. ``None`` berarti rantainya diambil dari
+        ``config.yaml``. Nilai eksplisit menggantikan rantai itu untuk jalankan
+        ini saja, dan itulah cara termurah menekan biaya token: rantai penuh
+        berisi sembilan gate, dan setiap revisi menjalankannya ulang. Nama yang
+        tidak dikenal ditolak saat gate dibangun — sebelum satu token pun
+        dibelanjakan — dan bukan jatuh diam-diam ke rantai bawaan.
 
     Merakit direktur di sini (bukan di perintah) berarti kesalahan konfigurasi —
     nama gate yang salah, prompt yang kehilangan ``output_model`` — gagal saat
@@ -604,10 +636,28 @@ def build_container(
     """
     project_root = (root or Path.cwd()).resolve()
     config = load_config(config_path, root=project_root, env=env, profile=profile)
+    if gates is not None:
+        # ``model_copy`` alih-alih memvalidasi ulang seluruh dokumen: yang
+        # berubah hanya satu field, dan nama gate-nya tetap diperiksa — oleh
+        # ``build_gates`` di bawah, yang memang pemilik daftar namanya.
+        config = config.model_copy(
+            update={"pipeline": config.pipeline.model_copy(update={"gates": tuple(gates)})}
+        )
     paths = ProjectPaths.from_config(project_root, config.paths)
+    if state_dir is not None:
+        paths = replace(
+            paths,
+            state=state_dir.resolve(),
+            sandbox=state_dir.resolve() / SANDBOX_DIRNAME,
+        )
     if output_dir is not None:
         paths = replace(paths, output=output_dir.resolve())
-    if dry_run:
+    if dry_run and state_dir is None:
+        # ``--dry-run`` memindahkan hasilnya ke sandbox supaya ``state/`` dan
+        # ``output/`` sungguhan tidak tersentuh. Pemanggil yang sudah menunjuk
+        # ``state`` ke direktori sekali pakai tidak butuh pemindahan kedua —
+        # dan bila tetap dipindahkan, hasilnya mendarat di tempat yang tidak ia
+        # minta (``state/dryrun/output/`` alih-alih direktori yang ia sebut).
         paths = paths.prepare_sandbox()
     else:
         paths.ensure_runtime_dirs()
@@ -624,10 +674,31 @@ def build_container(
         keep_alive=config.ollama.keep_alive,
         override=override,
     )
-    router = ModelRouter(registry, factory)
     library = prompt_library if prompt_library is not None else FilePromptLibrary(paths.prompts)
     sink = reporter if reporter is not None else NullReporter()
     active_clock = clock if clock is not None else SystemClock()
+
+    # Catatan §38 dipasang di titik tunggal tempat setiap agent meminta modelnya.
+    # Membungkus factory di sini — bukan menambahkan pencatatan ke dalam tiap
+    # agent — berarti tidak ada satu pun agent yang dapat lupa mencatat, dan
+    # tidak ada satu pun tanda tangan method agent yang berubah karenanya.
+    #
+    # ``factory`` yang tidak dibungkus tetap disimpan di container: ``doctor``
+    # menanyainya tentang ketersediaan model, dan pertanyaan itu tidak boleh
+    # menghasilkan baris catatan.
+    source: ChatModelSource = factory
+    if config.logging.enabled:
+        source = CallLoggingModelSource(
+            factory,
+            paths.call_logs_dir,
+            now=active_clock.now_iso,
+            # Nama model datang dari registry, bukan dari jawabannya: request
+            # sengaja mengirim ``model=""`` dan adapter yang tidak mengisi
+            # ``ChatResult.model`` akan menghasilkan catatan tanpa model.
+            model_for=lambda role: registry.spec_for(role).model,
+            output_chars=config.logging.output_chars,
+        )
+    router = ModelRouter(registry, source)
 
     state_store = JsonStateStore(
         paths.state,

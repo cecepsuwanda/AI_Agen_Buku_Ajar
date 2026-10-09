@@ -2,7 +2,7 @@
 
 Sejajar dengan :class:`~models.dry_run.DryRunChatModel`, dan dengan pembenaran
 yang sama: ``--dry-run`` menjanjikan jalur yang **tidak bergantung pada apa pun
-di luar proses ini**. Menjalankan ``latexmk`` sungguhan akan membuat dry run
+di luar proses ini**. Menjalankan perkakas LaTeX sungguhan akan membuat dry run
 bergantung pada dua hal yang justru tidak sedang diperiksa — terpasangnya LaTeX
 di mesin ini, dan kualitas isi bab yang disintesis dari skema saja.
 

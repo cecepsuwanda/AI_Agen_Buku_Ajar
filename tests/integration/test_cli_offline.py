@@ -35,7 +35,7 @@ from typer.testing import CliRunner
 from app.cli import app
 from app.container import SANDBOX_DIRNAME, FixedClock
 from domain.book import BookRequest, BookSpec, ChapterSpec
-from domain.chapter import ChapterDraft, ChapterRecord, Section
+from domain.chapter import ChapterDraft, ChapterRecord, ReviewResult, Section
 from domain.enums import ChapterStatus
 from domain.state import BookState
 from memory.project_state import JsonStateStore
@@ -171,7 +171,18 @@ def test_help_lists_every_command() -> None:
     result = RUNNER.invoke(app, ["--help"])
 
     assert result.exit_code == 0, result.output
-    for command in ("doctor", "plan", "run", "write-chapter", "status", "export"):
+    for command in (
+        "doctor",
+        "plan",
+        "run",
+        "write-chapter",
+        "status",
+        "export",
+        "compare",
+        "ingest",
+        "approve",
+        "reject",
+    ):
         assert command in result.output, command
     for option in ("--rps", "--output", "--dry-run", "--set-model", "--profile"):
         assert option in result.output, option
@@ -429,6 +440,57 @@ def test_dry_run_writes_the_jsonl_run_log(
     assert record["models"]["writer"]
 
 
+def test_a_run_writes_the_per_role_call_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Setiap panggilan model meninggalkan satu baris di ``output/logs/<peran>.jsonl`` (§38).
+
+    Ini pembuktian bahwa pencatatnya benar-benar **terpasang** — bukan sekadar
+    ada sebagai kelas yang diuji terpisah. Yang menghubungkannya adalah
+    composition root, dan hanya jalur sungguhan yang dapat membuktikannya.
+
+    ``--dry-run`` dipakai karena ia menempuh seluruh rantai gate tanpa satu
+    token: yang sedang diuji adalah pemasangan pencatatnya, bukan mutu jawaban.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+
+    result = RUNNER.invoke(
+        app, ["run", "--dry-run", "--rps", str(RPS_PATH), "--output", str(layout.output)]
+    )
+
+    assert result.exit_code == 0, result.output
+    logs = layout.sandbox_output / "logs"
+    written = sorted(path.name for path in logs.glob("*.jsonl"))
+    assert "writer.jsonl" in written, f"catatan penulis harus ada, yang tertulis: {written}"
+
+    record = json.loads((logs / "writer.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert record["role"] == "writer"
+    assert record["model"], "nama model yang menjawab ikut tercatat (itulah yang dibandingkan §33)"
+
+
+def test_the_call_log_never_leaks_into_the_repository(tmp_path: Path, monkeypatch) -> None:
+    """Catatan §38 hidup di dalam sandbox saat dry-run — bukan di ``output/logs`` repo.
+
+    Yang dituntut adalah **tidak ada baris catatan yang bocor**, bukan ketiadaan
+    direktorinya. ``output/logs/`` adalah direktori runtime yang sah —
+    :meth:`~app.container.Container.ensure_runtime_dirs` membuatnya untuk setiap
+    jalankan, termasuk ``doctor`` — sehingga pengembang yang pernah menjalankan
+    perintah yang didokumentasikan memang sudah memilikinya, dan menuntut
+    direktori itu tidak ada akan membuat tes ini gagal justru karena pekerjaan
+    yang benar. Yang tidak boleh terjadi adalah ``.jsonl`` di dalamnya.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+
+    result = RUNNER.invoke(
+        app, ["run", "--dry-run", "--rps", str(RPS_PATH), "--output", str(layout.output)]
+    )
+
+    assert result.exit_code == 0, result.output
+    repo_logs = PROJECT_ROOT / "output" / "logs"
+    leaked = sorted(path.name for path in repo_logs.glob("*.jsonl")) if repo_logs.is_dir() else []
+    assert not leaked, f"catatan §38 bocor ke repo: {leaked}"
+
+
 def test_dry_run_does_not_touch_the_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -517,6 +579,62 @@ def test_missing_rps_points_at_the_flag_that_was_typed(
     assert result.exit_code == 1
     assert "RPS" in result.output
     assert "--rps" in result.output or "tidak-ada.tex" in result.output
+
+
+def test_narrowing_the_gate_chain_with_gates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--gates reviewer`` menjalankan satu gate saja, bukan rantai penuh (§27).
+
+    Yang dibuktikan adalah **biaya**, bukan tampilan: rantai penuh berisi
+    sembilan gate dan setiap revisi menjalankannya ulang, jadi kemampuan
+    mempersempitnya adalah penangkal biaya token yang sesungguhnya. Buktinya
+    diambil dari prompt yang benar-benar ditulis ``--dry-run`` — yaitu peran
+    yang benar-benar dipanggil, bukan gate yang sekadar terdaftar.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(app, ["run", "--dry-run", "--gates", "reviewer"])
+
+    assert result.exit_code == 0, result.output
+    assert {_role_of(name) for name in _dry_run_prompts(layout)} == {
+        "chapter_planner",
+        "writer",
+        "reviewer",
+    }
+
+
+def test_an_empty_gates_value_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rantai tanpa gate menulis bab yang tidak diperiksa siapa pun.
+
+    Menerimanya diam-diam akan jauh lebih buruk daripada menolaknya: hasilnya
+    terlihat seperti buku yang selesai, dan tidak ada satu pun tanda bahwa
+    seluruh pemeriksaan terlewat.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(app, ["run", "--dry-run", "--gates", " , "])
+
+    assert result.exit_code == 1
+    assert "--gates" in result.output
+
+
+def test_an_unknown_gate_name_is_refused_with_the_known_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nama gate yang salah ketik disebutkan, beserta yang benar-benar ada."""
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(app, ["run", "--dry-run", "--gates", "penyair"])
+
+    assert result.exit_code == 1
+    assert "penyair" in result.output
+    assert "reviewer" in result.output
 
 
 def test_malformed_set_model_is_refused(
@@ -673,6 +791,42 @@ def _seed_approved_chapter(layout: Layout) -> None:
     )
 
 
+def _seed_waiting_chapter(layout: Layout) -> None:
+    """Tulis satu bab yang menunggu keputusan manusia langsung ke state (§44).
+
+    Bukan lewat ``run``: mengaktifkan gate §44 berarti menyunting
+    ``pipeline.gates`` untuk tes ini saja, dan yang sedang diuji di sini adalah
+    **tampilan** keadaan itu — bukan cara membentuknya. Vonis yang menunggu
+    itulah yang membedakannya dari bab yang sekadar terputus di status yang sama.
+    """
+    store = JsonStateStore(layout.state, clock=FixedClock("2026-10-07T12:00:00+00:00"))
+    spec = BookSpec(
+        title="Buku Uji",
+        chapters=(
+            ChapterSpec(
+                number=1,
+                title="Bab Uji",
+                objectives=("memahami sesuatu",),
+                sections=("Pengantar",),
+            ),
+        ),
+    )
+    store.save_book(
+        BookState(request=BookRequest(title="Buku Uji", target_chapters=1), spec=spec)
+    )
+    store.save_chapter(
+        ChapterRecord(
+            number=1,
+            status=ChapterStatus.LATEX_COMPILED,
+            spec=spec.chapters[0],
+            draft=ChapterDraft(title="Bab Uji"),
+            reviews=(
+                ReviewResult(gate="human_approval", approved=False, blocked=True),
+            ),
+        )
+    )
+
+
 def _repository_runtime_files() -> set[str]:
     """Berkas di ``state/`` dan ``output/`` milik repo, bila ada.
 
@@ -686,3 +840,217 @@ def _repository_runtime_files() -> set[str]:
             f"{name}/{relative}" for relative in _files_under(PROJECT_ROOT / name)
         }
     return found
+
+
+# ---------------------------------------------------------------------------
+# compare (§33)
+# ---------------------------------------------------------------------------
+def test_compare_runs_the_chapter_once_per_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Satu bab dikerjakan sekali untuk setiap model, masing-masing di direktorinya (§33).
+
+    Yang dibuktikan di sini bukan mutu modelnya — ``--dry-run`` menyintesis
+    jawabannya sehingga semua model menghasilkan bab yang sama — melainkan
+    **pemisahannya**: dua direktori hasil, dua catatan per peran, dan setiap
+    catatan menamai model yang benar-benar menjawab.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(
+        app,
+        ["compare", "--dry-run", "--chapter", "1", "--models", "gemma3:4b,gemma4:31b-cloud"],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    roots = sorted(path.name for path in (layout.sandbox_output / "compare").iterdir())
+    assert len(roots) == 2, roots
+    assert (layout.sandbox / "state" / "compare").is_dir()
+
+    logs = sorted((layout.sandbox_output / "compare").glob("*/logs/writer.jsonl"))
+    assert len(logs) == 2, logs
+
+    # Yang tercatat harus model yang diminta, bukan model profilnya: itulah yang
+    # membuat angka di tabelnya dapat dipercaya.
+    named = {
+        json.loads(line)["model"]
+        for path in logs
+        for line in path.read_text(encoding="utf-8").splitlines()
+    }
+    assert named == {"gemma3:4b", "gemma4:31b-cloud"}
+
+    records = sorted((layout.sandbox / "state" / "compare").glob("*/chapter01.json"))
+    assert len(records) == 2, records
+
+    assert not (PROJECT_ROOT / "state" / "compare").exists(
+    ), "hasil compare tidak boleh mendarat di state/ repo"
+
+
+def test_compare_refuses_an_unknown_role_and_lists_the_known_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Peran yang tidak ada di profil aktif harus disebut beserta yang tersedia."""
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(
+        app,
+        ["compare", "--dry-run", "--role", "penyair", "--models", "gemma3:4b"],
+    )
+
+    assert result.exit_code == 1
+    assert "penyair" in result.output
+    assert "writer" in result.output
+
+
+def test_compare_without_models_says_how_to_pass_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Daftar model kosong bukan perbandingan; pesannya memberi contoh yang dapat disalin."""
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(app, ["compare", "--dry-run", "--models", ""])
+
+    assert result.exit_code == 1
+    assert "--models" in result.output
+
+
+def test_compare_refuses_a_chapter_the_plan_does_not_have(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bab yang tidak ada di BookSpec ditolak dengan menyebut bab yang ada."""
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(
+        app, ["compare", "--dry-run", "--chapter", "99", "--models", "gemma3:4b"]
+    )
+
+    assert result.exit_code == 1
+    assert "Bab 99" in result.output
+
+
+# ---------------------------------------------------------------------------
+# approve / reject (§44)
+# ---------------------------------------------------------------------------
+def test_approve_on_a_chapter_that_is_already_approved_is_not_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Perintah yang dijalankan dua kali karena ragu bukan kesalahan pemakaian.
+
+    Ini keadaan yang paling sering terjadi dalam praktik — gate §44 biasanya
+    **mati**, jadi babnya sudah ``APPROVED`` sebelum dosen sempat mengetik
+    ``approve``. Menjawabnya dengan exit 1 akan membuat skrip yang menyetujui
+    bab gagal pada buku yang justru sudah benar.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_approved_chapter(layout)
+
+    result = RUNNER.invoke(app, ["approve", "1"])
+
+    assert result.exit_code == 0, result.output
+    assert "sudah disetujui sebelumnya" in result.output
+
+
+def test_approve_refuses_a_chapter_that_is_not_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bab yang belum dikerjakan tidak punya apa pun untuk disahkan.
+
+    §44 ada untuk mencegah penerbitan yang belum diperiksa; menyetujui bab yang
+    belum ditulis akan mengesahkan kekosongan. Pesannya harus menunjuk perintah
+    yang benar-benar dibutuhkan, bukan sekadar menyatakan statusnya.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(app, ["approve", "1"])
+
+    assert result.exit_code == 1
+    assert "belum dapat disetujui" in result.output
+    assert "run" in result.output
+
+
+def test_approve_names_the_chapters_the_plan_actually_has(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nomor yang salah adalah kesalahan pengetikan, dan pesannya menyebut yang ada."""
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_plan(layout)
+
+    result = RUNNER.invoke(app, ["approve", "99"])
+
+    assert result.exit_code == 1
+    assert "Bab 99" in result.output
+
+
+def test_reject_hands_an_approved_chapter_back_to_the_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Jalur yang paling berguna justru saat gate §44 mati.
+
+    Tanpa gate §44, bab yang sudah ``APPROVED`` tidak lagi dilewati gate mana
+    pun — tidak ada jalur otomatis yang dapat mengembalikannya ke penulis. Yang
+    diperiksa di sini adalah hasil akhirnya: statusnya benar-benar kembali, dan
+    alasan yang diketik dosen benar-benar tersimpan (bukan hanya tercetak).
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_approved_chapter(layout)
+
+    result = RUNNER.invoke(app, ["reject", "1", "--reason", "Contohnya tidak relevan."])
+
+    # Bab yang kembali ke penulis bukan bab yang gagal: exit 0, karena tidak ada
+    # yang perlu diperbaiki dari jalannya program.
+    assert result.exit_code == 0, result.output
+    assert "dikembalikan ke penulis" in result.output
+
+    store = JsonStateStore(layout.state, clock=FixedClock("2026-10-07T12:00:00+00:00"))
+    record = store.load_chapter(1)
+    assert record is not None
+    assert record.status is ChapterStatus.REVISION
+    assert record.revision == 1
+    last = record.last_review()
+    assert last is not None
+    assert last.feedback == ("Contohnya tidak relevan.",)
+    assert record.markdown_path is None
+
+
+def test_reject_without_a_reason_still_records_something(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Vonis tanpa catatan terbaca sebagai penolakan yang tidak dapat ditindaklanjuti."""
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_approved_chapter(layout)
+
+    result = RUNNER.invoke(app, ["reject", "1"])
+
+    assert result.exit_code == 0, result.output
+    store = JsonStateStore(layout.state, clock=FixedClock("2026-10-07T12:00:00+00:00"))
+    record = store.load_chapter(1)
+    assert record is not None
+    last = record.last_review()
+    assert last is not None
+    assert last.feedback == ("Ditolak tanpa alasan tertulis.",)
+
+
+def test_status_shows_a_waiting_chapter_as_waiting_not_as_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bab yang menunggu keputusan manusia bukan bab yang ditolak (§44).
+
+    Bedanya bukan hiasan: ``tolak`` pada tabel status akan mengirim pembacanya
+    mencari kesalahan yang tidak ada. Yang benar adalah kolom ``gate terakhir``
+    berbunyi "menunggu", dan itulah satu-satunya tempat keadaan ini terlihat
+    tanpa membuka berkas JSON.
+    """
+    layout = _layout(tmp_path, monkeypatch)
+    _seed_waiting_chapter(layout)
+
+    result = RUNNER.invoke(app, ["status"])
+
+    assert result.exit_code == 0, result.output
+    assert "menunggu" in result.output
+    assert "tolak" not in result.output

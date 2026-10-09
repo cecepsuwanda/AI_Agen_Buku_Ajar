@@ -121,12 +121,27 @@ class RichReporter:
         Gate yang *dilewati* (``skipped``) hanya tampil dengan ``--verbose`` —
         itu memang bukan berita. Gate yang benar-benar memeriksa selalu tampil,
         beserta skornya.
+
+        Vonis yang **menunggu keputusan manusia** (§44) dicetak sebelum yang
+        lain, dan dengan kata "menunggu" alih-alih "ditolak": gate ini tidak
+        menemukan kesalahan apa pun, dan mencetaknya sebagai penolakan akan
+        membuat dosen mencari-cari apa yang salah pada bab yang sebenarnya
+        hanya belum dibaca.
         """
         if result.skipped:
             if self._verbose:
                 self._console.print(
                     f"  bab {number}: [dim]{result.gate} dilewati[/dim]"
                 )
+            return
+
+        if result.blocked:
+            self._console.print(
+                f"  bab {number}: [yellow]{result.gate}: menunggu keputusan "
+                f"manusia[/yellow]"
+            )
+            for line in result.feedback[:5]:
+                self._console.print(f"      [dim]-[/dim] {line}")
             return
 
         if result.approved:

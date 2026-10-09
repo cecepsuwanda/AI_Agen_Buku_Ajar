@@ -50,6 +50,12 @@ EXPECTED: dict[tuple[ChapterStatus, ChapterEvent], ChapterStatus] = {
     (ChapterStatus.CITATION_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.PEDAGOGY_REVIEWED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.CONSISTENCY_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    # Tahap LaTeX dan peninjauan akhir. Ketiganya perlu karena gate §26 **boleh
+    # menolak**: bab yang potongannya tidak dapat dikompilasi harus kembali ke
+    # penulis, bukan ditandai gagal.
+    (ChapterStatus.REVIEWED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.LATEX_GENERATED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.LATEX_COMPILED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.FAILED_REVIEW, ChapterEvent.REVISE): ChapterStatus.REVISION,
     (ChapterStatus.REVIEWED, ChapterEvent.APPROVE): ChapterStatus.APPROVED,
     (ChapterStatus.LATEX_COMPILED, ChapterEvent.APPROVE): ChapterStatus.APPROVED,

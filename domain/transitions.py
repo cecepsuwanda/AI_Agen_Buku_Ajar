@@ -53,6 +53,17 @@ _TRANSITIONS: Mapping[tuple[ChapterStatus, ChapterEvent], ChapterStatus] = {
     (ChapterStatus.CITATION_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.PEDAGOGY_REVIEWED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     (ChapterStatus.CONSISTENCY_CHECKED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    # Tahap LaTeX dan peninjauan akhir. Ketiganya ditambahkan bersama-sama, dan
+    # yang membuatnya perlu adalah gate §26: ia **boleh menolak** — bab yang
+    # potongannya tidak dapat dikompilasi setelah beberapa kali perbaikan memang
+    # tidak dapat dicetak — dan penolakan itu harus mengembalikan babnya ke
+    # revisi. Tanpa baris-baris ini, penolakan tersebut berakhir sebagai
+    # ``IllegalTransitionError`` yang dikandung ``run``: babnya ditandai gagal
+    # alih-alih direvisi, dan satu karakter ``&`` yang belum diloloskan cukup
+    # untuk membuang seluruh bab.
+    (ChapterStatus.REVIEWED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.LATEX_GENERATED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
+    (ChapterStatus.LATEX_COMPILED, ChapterEvent.REVIEW_FAIL): ChapterStatus.FAILED_REVIEW,
     # Masuk kembali ke antrean revisi
     (ChapterStatus.FAILED_REVIEW, ChapterEvent.REVISE): ChapterStatus.REVISION,
     # Persetujuan akhir

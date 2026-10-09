@@ -23,7 +23,7 @@ diturunkan ke nol. Itu sebabnya ia berupa ``for`` loop berbatas, bukan
 
 from __future__ import annotations
 
-from typing import Any, Generic, Mapping, TypeVar, cast
+from typing import Any, Generic, Mapping, Sequence, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -109,6 +109,7 @@ class StructuredAgent(Generic[TOut]):
         prompt_name: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        sources: Sequence[str] = (),
     ) -> TOut:
         """Render prompt, panggil model, dan kembalikan keluaran yang tervalidasi.
 
@@ -120,6 +121,12 @@ class StructuredAgent(Generic[TOut]):
             di sini alih-alih menjadikan "revisi" subclass tersendiri: menyalin
             loop perbaikan ke subclass berarti dua tempat yang harus dijaga
             sinkron.
+
+        :param sources: penanda bahan yang ikut menentukan permintaan ini — id
+            potongan bukti dari basis pengetahuan (§13, §38). Diberikan hanya
+            oleh agent yang benar-benar mengambil bukti; sisanya membiarkannya
+            kosong, dan catatan §38 menulisnya sebagai daftar kosong alih-alih
+            menebaknya dari isi prompt.
 
         :raises AgentOutputError: bila seluruh percobaan (termasuk perbaikan)
             gagal menghasilkan keluaran yang valid.
@@ -152,6 +159,7 @@ class StructuredAgent(Generic[TOut]):
                 # memperbaiki kesalahan yang sudah ditunjuk, bukan berkreasi.
                 temperature=0.0 if repair else temperature,
                 max_tokens=max_tokens,
+                sources=sources,
             )
             raw = result.text
 
@@ -186,6 +194,7 @@ class StructuredAgent(Generic[TOut]):
         prompt_version: str,
         temperature: float | None,
         max_tokens: int | None,
+        sources: Sequence[str] = (),
     ) -> ChatResult:
         """Satu panggilan model. Skema selalu dikirim — pada setiap percobaan.
 
@@ -204,6 +213,7 @@ class StructuredAgent(Generic[TOut]):
                 think=self._think,
                 role=self.role,
                 prompt_version=prompt_version,
+                sources=tuple(sources),
             )
         )
 

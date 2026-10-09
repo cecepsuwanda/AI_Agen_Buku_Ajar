@@ -26,7 +26,6 @@ memerlukan satu pun suntingan di sini.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -95,29 +94,9 @@ def draft_json(summary: str) -> str:
 # ---------------------------------------------------------------------------
 # Perlengkapan
 # ---------------------------------------------------------------------------
-@pytest.fixture
-def state(tmp_path: Path) -> JsonStateStore:
-    """Penyimpanan state asli di ``tmp_path`` — bukan palsu.
-
-    Sengaja: atomik, ``schema_version``, dan penomoran berkas ikut diuji di sini.
-    Penyimpanan palsu akan membuat seluruh berkas ini tetap hijau meskipun
-    ``memory/`` rusak — dan itu justru satu-satunya bagian yang paling mahal
-    bila salah.
-    """
-    return JsonStateStore(tmp_path / "state", clock=FixedClock("2026-10-07T12:00:00+00:00"))
-
-
-@pytest.fixture
-def artifacts(tmp_path: Path) -> MarkdownArtifacts:
-    """Penulis Markdown asli di ``output/`` milik tes."""
-    return MarkdownArtifacts(tmp_path / "output")
-
-
-@pytest.fixture
-def reporter() -> RecordingReporter:
-    return RecordingReporter()
-
-
+# ``state``, ``artifacts``, dan ``reporter`` tinggal di ``conftest.py`` direktori
+# ini: berkas uji integrasi yang kedua memakainya juga, dan dua salinan
+# perlengkapan akan berbeda diam-diam pada suatu hari.
 def seed_book(state: JsonStateStore, chapters: int = 3) -> BookSpec:
     """Tulis ``book.json`` langsung, tanpa memanggil Book Planner.
 

@@ -33,16 +33,22 @@ from typing import Annotated, Optional
 import typer
 
 from app.commands import (
+    DEFAULT_COMPARE_ROLE,
+    CompareParams,
     DoctorParams,
     GlobalOptions,
     RunParams,
+    do_approve,
+    do_compare,
     do_doctor,
     do_export,
     do_ingest,
     do_plan,
+    do_reject,
     do_run,
     do_status,
     do_write_chapter,
+    parse_model_list,
 )
 
 # ---------------------------------------------------------------------------
@@ -113,6 +119,17 @@ MaxRevisionsOpt = Annotated[
     Optional[int],
     typer.Option("--max-revisions", help="Batas revisi per bab (default dari config)."),
 ]
+GatesOpt = Annotated[
+    Optional[str],
+    typer.Option(
+        "--gates",
+        metavar="NAMA,NAMA",
+        help=(
+            "Persempit rantai gate untuk jalankan ini, dipisah koma "
+            "(default dari config). Contoh: --gates reviewer"
+        ),
+    ),
+]
 ChapterOpt = Annotated[
     Optional[int],
     typer.Option("--chapter", "-c", help="Kerjakan hanya bab ini."),
@@ -132,6 +149,18 @@ ForceOpt = Annotated[
 DryRunOpt = Annotated[
     Optional[bool],
     typer.Option("--dry-run", help="Tulis prompt ke state/dryrun/, tanpa memanggil model."),
+]
+CompareRoleOpt = Annotated[
+    str,
+    typer.Option("--role", help=f"Peran yang dibandingkan (default: {DEFAULT_COMPARE_ROLE})."),
+]
+CompareModelsOpt = Annotated[
+    str,
+    typer.Option(
+        "--models",
+        metavar="MODEL,MODEL",
+        help="Daftar model yang dibandingkan, dipisah koma. Wajib.",
+    ),
 ]
 
 app = typer.Typer(
@@ -209,6 +238,7 @@ def _params(
     language: str | None = None,
     target_chapters: int | None = None,
     max_revisions: int | None = None,
+    gates: str | None = None,
     chapter: int | None = None,
     chapters_from: int | None = None,
     chapters_to: int | None = None,
@@ -240,6 +270,7 @@ def _params(
         language=language,
         target_chapters=target_chapters,
         max_revisions=max_revisions,
+        gates=gates,
         chapter=chapter,
         chapters_from=chapters_from,
         chapters_to=chapters_to,
@@ -269,6 +300,7 @@ def root(
     language: LanguageOpt = None,
     target_chapters: TargetChaptersOpt = None,
     max_revisions: MaxRevisionsOpt = None,
+    gates: GatesOpt = None,
     chapter: ChapterOpt = None,
     from_chapter: FromOpt = None,
     to_chapter: ToOpt = None,
@@ -303,6 +335,7 @@ def root(
         language=language,
         target_chapters=target_chapters,
         max_revisions=max_revisions,
+        gates=gates,
         chapter=chapter,
         chapters_from=from_chapter,
         chapters_to=to_chapter,
@@ -408,6 +441,7 @@ def run(
     language: LanguageOpt = None,
     target_chapters: TargetChaptersOpt = None,
     max_revisions: MaxRevisionsOpt = None,
+    gates: GatesOpt = None,
     chapter: ChapterOpt = None,
     from_chapter: FromOpt = None,
     to_chapter: ToOpt = None,
@@ -433,6 +467,7 @@ def run(
                 language=language,
                 target_chapters=target_chapters,
                 max_revisions=max_revisions,
+                gates=gates,
                 chapter=chapter,
                 chapters_from=from_chapter,
                 chapters_to=to_chapter,
@@ -457,6 +492,7 @@ def write_chapter(
     log_json: LogJsonOpt = None,
     output: OutputOpt = None,
     max_revisions: MaxRevisionsOpt = None,
+    gates: GatesOpt = None,
     force: ForceOpt = None,
     dry_run: DryRunOpt = None,
 ) -> None:
@@ -473,9 +509,88 @@ def write_chapter(
                 log_json=log_json,
                 output=output,
                 max_revisions=max_revisions,
+                gates=gates,
                 force=bool(force),
                 dry_run=bool(dry_run),
             ),
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# approve / reject (§44)
+# ---------------------------------------------------------------------------
+@app.command()
+def approve(
+    ctx: typer.Context,
+    number: Annotated[int, typer.Argument(help="Nomor bab yang disetujui.")],
+    config: ConfigOpt = None,
+    profile: ProfileOpt = None,
+    set_model: SetModelOpt = None,
+    verbose: VerboseOpt = None,
+    log_json: LogJsonOpt = None,
+    output: OutputOpt = None,
+) -> None:
+    """Setujui sebuah bab atas keputusan manusia (§44).
+
+    Perintah ini menjawab gate ``human_approval`` bila ia diaktifkan di
+    ``pipeline.gates``. Tanpa gate itu pun ia berguna: ia memastikan babnya
+    benar-benar disetujui dan Markdown-nya ada.
+    """
+    raise typer.Exit(
+        code=do_approve(
+            number,
+            _params(
+                ctx,
+                config=config,
+                profile=profile,
+                set_model=set_model,
+                verbose=verbose,
+                log_json=log_json,
+                output=output,
+            ),
+        )
+    )
+
+
+@app.command()
+def reject(
+    ctx: typer.Context,
+    number: Annotated[int, typer.Argument(help="Nomor bab yang dikembalikan.")],
+    reason: Annotated[
+        str,
+        typer.Option(
+            "--reason",
+            "-m",
+            help="Alasan penolakan; menjadi instruksi revisi bagi penulis.",
+        ),
+    ] = "",
+    config: ConfigOpt = None,
+    profile: ProfileOpt = None,
+    set_model: SetModelOpt = None,
+    verbose: VerboseOpt = None,
+    log_json: LogJsonOpt = None,
+    output: OutputOpt = None,
+) -> None:
+    """Kembalikan sebuah bab ke penulis atas keputusan manusia (§44).
+
+    Babnya kembali ke antrean revisi tanpa kehilangan riset dan drafnya;
+    jalankan ``run`` atau ``write-chapter`` untuk menulis ulang babnya dengan
+    "reason" sebagai instruksi.
+    """
+    raise typer.Exit(
+        code=do_reject(
+            number,
+            _params(
+                ctx,
+                config=config,
+                profile=profile,
+                set_model=set_model,
+                verbose=verbose,
+                log_json=log_json,
+                output=output,
+            ),
+            reason=reason,
         )
     )
 
@@ -576,6 +691,54 @@ def export(
     )
 
 
+# ---------------------------------------------------------------------------
+# compare
+# ---------------------------------------------------------------------------
+@app.command()
+def compare(
+    ctx: typer.Context,
+    models: CompareModelsOpt,
+    role: CompareRoleOpt = DEFAULT_COMPARE_ROLE,
+    config: ConfigOpt = None,
+    profile: ProfileOpt = None,
+    set_model: SetModelOpt = None,
+    verbose: VerboseOpt = None,
+    log_json: LogJsonOpt = None,
+    rps: RpsOpt = None,
+    output: OutputOpt = None,
+    chapter: ChapterOpt = None,
+    max_revisions: MaxRevisionsOpt = None,
+    dry_run: DryRunOpt = None,
+) -> None:
+    """Bandingkan beberapa model pada tugas yang sama (§33).
+
+    Bab yang sama dikerjakan sekali untuk setiap model, lalu hasilnya
+    disandingkan: skor peninjau, jumlah revisi, banyaknya panggilan, token, dan
+    detiknya. Angka panggilan dan tokennya dibaca dari catatan per peran (§38).
+    """
+    raise typer.Exit(
+        code=do_compare(
+            CompareParams(
+                run=_params(
+                    ctx,
+                    config=config,
+                    profile=profile,
+                    set_model=set_model,
+                    verbose=verbose,
+                    log_json=log_json,
+                    rps=rps,
+                    output=output,
+                    chapter=chapter,
+                    max_revisions=max_revisions,
+                    dry_run=bool(dry_run),
+                ),
+                role=role,
+                models=parse_model_list(models),
+            )
+        )
+    )
+
+
 def main() -> None:
     """Titik masuk ``ai-book`` (lihat ``entry_points`` di ``setup.cfg``)."""
     configure_stdio()
@@ -584,12 +747,15 @@ def main() -> None:
 
 __all__ = [
     "app",
+    "approve",
+    "compare",
     "configure_stdio",
     "doctor",
     "export",
     "ingest",
     "main",
     "plan",
+    "reject",
     "root",
     "run",
     "status",

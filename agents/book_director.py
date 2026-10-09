@@ -48,10 +48,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from domain.book import BookRequest, BookSpec, ChapterSpec
-from domain.chapter import ChapterRecord, ResearchPackage
+from domain.chapter import ChapterRecord, ResearchPackage, ReviewResult
 from domain.enums import ChapterEvent, ChapterStatus, is_approved
 from domain.errors import (
     AgentOutputError,
+    ApprovalNotPossibleError,
     BookNotPlannedError,
     ChapterNotPlannedError,
     ConfigError,
@@ -68,6 +69,7 @@ from domain.ports import ChapterArtifacts, Reporter, Researcher, ReviewGate, Sta
 from domain.rendering import render_chapter_markdown
 from domain.rules import (
     approved_terminology,
+    awaiting_approval,
     find_chapter,
     pending_numbers,
     remembered_citations,
@@ -76,6 +78,7 @@ from domain.rules import (
     with_draft,
     with_failure,
     with_gate_result,
+    with_human_rejection,
     with_research,
 )
 from domain.rps import CoursePlan
@@ -83,6 +86,7 @@ from domain.state import BookState, RunReport
 from domain.transitions import can_advance, status_after_gate, transition
 
 from agents.chapter_planner import ChapterPlannerAgent
+from agents.human_approval import HUMAN_APPROVAL_GATE
 from agents.planner import BookPlanner
 from agents.writer import DEFAULT_MIN_WORDS, ChapterWriter
 
@@ -157,6 +161,22 @@ DRAFT_READY_STATUSES: frozenset[ChapterStatus] = frozenset(
 )
 
 
+def _carried_score(record: ChapterRecord) -> int:
+    """Skor vonis terakhir yang **benar-benar menilai** bab ini (MURNI).
+
+    Dipakai vonis persetujuan manusia (§44). Vonis itu tidak menilai apa pun —
+    manusianya membaca, bukan menyekor — jadi ia melaporkan skor yang sudah
+    diberikan pipeline, bukan angka baru yang dikarang di sini. Yang dibaca
+    adalah vonis terakhir yang bukan vonis "menunggu": vonis menunggu selalu
+    berskor nol, dan membawanya ke vonis persetujuan akan membuat bab yang
+    disetujui tercatat berskor nol di ``state/chapterNN.json``.
+    """
+    for review in reversed(record.reviews):
+        if not review.blocked:
+            return review.score
+    return 0
+
+
 @dataclass(frozen=True, slots=True)
 class DirectorSettings:
     """Angka-angka yang mengatur perilaku direktur.
@@ -186,11 +206,18 @@ class _GateOutcome:
     dapat mengembalikan **tiga** hal sekaligus — record terbaru, apakah lulus,
     dan gate mana yang menolak — tanpa memaksa pemanggilnya membongkar
     ``record.reviews`` untuk menebak yang ketiga.
+
+    ``blocked`` adalah keadaan ketiga yang tidak dapat diwakili ``approved``:
+    bab yang menunggu keputusan manusia tidak lulus dan tidak ditolak. Ia perlu
+    berdiri sendiri karena pemanggilnya harus memperlakukannya berbeda —
+    ``_write_and_review`` berhenti tanpanya, sedangkan ``approved=False`` akan
+    mengirim bab yang baik ke antrean revisi.
     """
 
     record: ChapterRecord
     approved: bool
     rejected_by: str | None = None
+    blocked: bool = False
 
 
 class BookDirector:
@@ -355,7 +382,9 @@ class BookDirector:
             peninjau menolak sampai batas revisi habis, ``FAILED_REVIEW`` —
             **tanpa exception**, karena penolakan adalah kondisi bisnis yang
             diharapkan, dan ``record.last_review().feedback`` sudah memuat
-            alasannya.
+            alasannya. Bila gate terakhir menunggu keputusan manusia (§44),
+            statusnya tetap di tempat gate itu berhenti (``LATEX_COMPILED``),
+            dan vonis yang menunggu itu tercatat di ``record``.
 
         :raises BookNotPlannedError: bila ``plan`` belum pernah dijalankan.
         :raises ChapterNotPlannedError: bila ``number`` tidak ada di ``BookSpec``.
@@ -403,6 +432,116 @@ class BookDirector:
         record = self._ensure_plan(record, base, book)
 
         return self._write_and_review(record, book)
+
+    # -----------------------------------------------------------------
+    # Keputusan manusia (§44)
+    # -----------------------------------------------------------------
+    def approve(self, number: int) -> ChapterRecord:
+        """Setujui sebuah bab atas keputusan manusia, lalu tulis deliverable-nya (§44).
+
+        Inilah jawaban yang ditunggu gate §44. Ia bekerja dalam dua keadaan, dan
+        keduanya memang perlu:
+
+        * **Gate §44 aktif** — babnya berhenti di ``LATEX_COMPILED`` dengan vonis
+          yang menunggu. Menyetujuinya menambahkan vonis manusia ke ``reviews``
+          dan menaikkan statusnya ke ``APPROVED``, lewat jalur yang sama dengan
+          penyetujuan otomatis: :func:`~domain.transitions.status_after_gate`
+          tetap menjaga rantai §27, sehingga bab yang belum melewati gate apa pun
+          tidak dapat tiba-tiba menjadi ``APPROVED``.
+        * **Gate §44 mati** — babnya sudah ``APPROVED`` sejak ``run`` selesai.
+          Menyetujuinya lagi tidak mengubah apa pun selain memastikan Markdown-nya
+          ada — dan itu jawaban yang benar: yang diminta sudah menjadi kenyataan.
+
+        Bab yang sudah disetujui karena itu **tidak** ditolak sebagai kesalahan
+        pemakaian. Menjalankan ``approve`` dua kali adalah hal yang wajar
+        dilakukan orang yang tidak yakin apakah perintahnya yang pertama berhasil.
+
+        :raises ApprovalNotPossibleError: bila babnya tidak sedang menunggu keputusan.
+        """
+        record = self._load_decidable(number, action="disetujui")
+
+        if is_approved(record.status):
+            self._reporter.info(f"Bab {number} sudah disetujui sebelumnya.")
+            return self._restore_markdown_if_missing(record)
+
+        verdict = ReviewResult(
+            gate=HUMAN_APPROVAL_GATE,
+            approved=True,
+            score=_carried_score(record),
+            feedback=(f"Disetujui manusia (ai-book approve {number}).",),
+        )
+        return self._finalize(
+            with_gate_result(record, verdict, produces=ChapterStatus.APPROVED)
+        )
+
+    def reject(self, number: int, *, reason: str = "") -> ChapterRecord:
+        """Kembalikan sebuah bab ke penulis atas keputusan manusia (§44).
+
+        Ini perintah yang paling berguna justru ketika gate §44 **mati**: bab
+        yang sudah ``APPROVED`` tidak pernah lagi dilewati gate mana pun, jadi
+        tidak ada jalur otomatis yang dapat mengembalikannya ke penulis. Seorang
+        dosen yang membaca hasil akhir dan mendapati satu bagian keliru harus
+        dapat mengembalikannya tanpa membuang riset dan draf yang masih baik —
+        dan itulah yang dilakukan :func:`~domain.rules.with_human_rejection`:
+        statusnya kembali ke ``REVISION``, seluruh pekerjaan sebelumnya tetap ada.
+
+        ``reason`` menjadi ``feedback`` vonis, dan dari sana ia mengalir ke
+        :meth:`ChapterWriter.revise` pada ``run`` berikutnya. Alasan yang tidak
+        ditulis bukan alasan yang hilang: pesannya menjadi "Ditolak tanpa alasan
+        tertulis", karena vonis tanpa catatan akan terbaca sebagai penolakan
+        yang tidak dapat ditindaklanjuti.
+
+        :raises ApprovalNotPossibleError: bila babnya tidak sedang menunggu keputusan.
+        """
+        record = self._load_decidable(number, action="ditolak")
+
+        verdict = ReviewResult(
+            gate=HUMAN_APPROVAL_GATE,
+            approved=False,
+            feedback=(reason.strip() or "Ditolak tanpa alasan tertulis.",),
+        )
+        updated = with_human_rejection(record, verdict)
+        self._state.save_chapter(updated)
+        self._reporter.stage(number, updated.status)
+        self._reporter.warn(
+            f"Bab {number} dikembalikan ke penulis (revisi {updated.revision}). "
+            f"Jalankan 'run' atau 'write-chapter {number}' untuk menulis ulang."
+        )
+        return updated
+
+    def _load_decidable(self, number: int, *, action: str) -> ChapterRecord:
+        """Record bab yang sudah menerima giliran keputusan manusia (§44).
+
+        Yang boleh diputuskan hanyalah bab yang **memang menunggu keputusan** —
+        yaitu bab yang vonis terakhirnya menunggu, atau bab yang sudah
+        disetujui. Keduanya keadaan yang sungguh-sungguh ada, dan keduanya
+        dibedakan dari bab yang sekadar belum selesai:
+
+        * Bab yang terputus di tengah rantai gate tidak pernah menunggu siapa
+          pun. Menyetujuinya berarti mengesahkan bab yang belum diperiksa
+          pemeriksa fakta, sitasi, pedagogi, dan konsistensi — dan itu justru
+          hal yang §44 ada untuk mencegahnya.
+        * Bab yang baru saja ditolak manusia berstatus ``REVISION`` dan bukan
+          menunggu apa pun; ia menunggu **penulis**, bukan pembaca.
+
+        Karena itu tolok ukurnya adalah vonisnya, bukan posisi statusnya di
+        rantai §27. Posisi bergantung pada rantai gate mana yang diaktifkan
+        konfigurasi; vonis yang menunggu berarti hal yang sama pada rantai
+        mana pun.
+
+        :raises ApprovalNotPossibleError: bila buku belum direncanakan, babnya
+            tidak ada di rencana, atau babnya belum sampai tahap keputusan.
+        """
+        book = self._require_book()
+        spec = self._require_spec(book)
+        find_chapter(spec, number)
+
+        record = self._state.load_chapter(number)
+        if record is None:
+            raise ApprovalNotPossibleError(number, ChapterStatus.PLANNED, action=action)
+        if not (is_approved(record.status) or awaiting_approval(record)):
+            raise ApprovalNotPossibleError(number, record.status, action=action)
+        return record
 
     # -----------------------------------------------------------------
     # Tahap-tahap
@@ -461,6 +600,10 @@ class BookDirector:
         Penghitung revisi hidup di ``record``, bukan di variabel lokal. Itu yang
         membuat resume melanjutkan penomoran alih-alih mengulanginya: bab yang
         terputus pada revisi ke-2 tidak kembali menjadi revisi ke-1.
+
+        Bab yang gate terakhirnya **menunggu keputusan manusia** (§44)
+        dikembalikan apa adanya, tanpa revisi dan tanpa penyetujuan. Ia bukan
+        pekerjaan yang selesai, dan juga bukan pekerjaan yang gagal.
         """
         budget = max(self._settings.max_revisions, 0) + 1
 
@@ -468,6 +611,21 @@ class BookDirector:
             record = self._ensure_draft(record, book)
             outcome = self._run_gates(record, book)
             record = outcome.record
+
+            if outcome.blocked:
+                # Babnya berhenti di sini **tanpa** menghabiskan anggaran
+                # revisi, dan itu disengaja: tidak ada yang salah dengan babnya,
+                # yang belum ada hanyalah keputusannya. Mengirimnya ke revisi
+                # akan menulis ulang bab yang tidak dikeluhkan siapa pun, dan
+                # menghabiskan jatah revisi yang seharusnya dipakai untuk
+                # keluhan yang sungguhan.
+                self._reporter.warn(
+                    f"Bab {record.number} menunggu persetujuan manusia "
+                    f"(gate {outcome.rejected_by!r}). "
+                    f"Jalankan 'approve {record.number}' atau "
+                    f"'reject {record.number} --reason \"...\"'."
+                )
+                return record
 
             if outcome.approved:
                 return self._finalize(record)
@@ -573,6 +731,11 @@ class BookDirector:
             current = with_gate_result(current, result, produces=gate.produces)
             self._state.save_chapter(current)
 
+            if result.blocked:
+                return _GateOutcome(
+                    record=current, approved=False, rejected_by=gate.name, blocked=True
+                )
+
             if not result.approved:
                 return _GateOutcome(record=current, approved=False, rejected_by=gate.name)
 
@@ -598,20 +761,21 @@ class BookDirector:
 
         Persetujuan di sini memakai :func:`~domain.transitions.status_after_gate`,
         sehingga rantai tetap dijaga: bab yang belum melewati gate mana pun tidak
-        dapat tiba-tiba menjadi ``APPROVED``.
+        dapat tiba-tiba menjadi ``APPROVED``. Bab yang **sudah** ``APPROVED``
+        ketika sampai di sini dilewati — itulah jalur ``approve`` §44, yang
+        menaikkannya lewat :func:`~domain.rules.with_gate_result` dan sudah
+        dijaga di sana. Menaikkannya sekali lagi justru ditolak rantai itu
+        sendiri, karena ``APPROVED → APPROVED`` bukan kemajuan.
         """
         draft = record.draft
         if draft is None:  # hanya mungkin bila daftar gate kosong
             raise GatePreconditionError("approval", record.number, "draf")
 
-        approved = record.model_copy(
-            update={
-                "status": status_after_gate(
-                    record.status, ChapterStatus.APPROVED, gate="approval"
-                ),
-                "error": None,
-            }
-        )
+        status = record.status
+        if not is_approved(status):
+            status = status_after_gate(status, ChapterStatus.APPROVED, gate="approval")
+
+        approved = record.model_copy(update={"status": status, "error": None})
 
         spec = record.spec
         path = self._artifacts.save_chapter(
@@ -820,13 +984,17 @@ class BookDirector:
         **sebelumnya** tetap terhitung, sehingga "6 dari 8" berarti enam bab
         selesai — bukan enam bab yang selesai pada proses ini.
 
-        Ketiga angka itu menjumlah persis ke ``total``, dan pembagiannya
+        Keempat angka itu menjumlah persis ke ``total``, dan pembagiannya
         ditentukan oleh **keberadaan record**, bukan oleh statusnya:
 
         * ``approved`` — record ada dan disetujui.
-        * ``failed`` — record ada tetapi tidak disetujui. Setelah proses yang
-          selesai, setiap bab yang pernah disentuh pasti berakhir di sini atau
-          di ``approved``; tidak ada keadaan ketiga.
+        * ``pending`` — record ada dan vonis terakhirnya menunggu keputusan
+          manusia (§44). Dibaca lewat :func:`~domain.rules.awaiting_approval`,
+          bukan dari statusnya: bab yang terputus di tengah rantai dapat berhenti
+          di status yang sama tanpa ada yang menunggu apa pun.
+        * ``failed`` — record ada, tidak disetujui, dan tidak menunggu apa pun.
+          Setelah proses yang selesai, setiap bab yang pernah disentuh pasti
+          berakhir di sini, di ``pending``, atau di ``approved``.
         * ``skipped`` — belum pernah disentuh sama sekali.
 
         Sengaja **tidak** memakai ``record.error is not None`` sebagai penanda
@@ -838,12 +1006,14 @@ class BookDirector:
         """
         records = self._load_records(targets)
         approved = sum(1 for r in records if is_approved(r.status))
+        pending = sum(1 for r in records if awaiting_approval(r))
 
         return RunReport(
             total=len(targets),
             approved=approved,
-            failed=len(records) - approved,
+            failed=len(records) - approved - pending,
             skipped=len(targets) - len(records),
+            pending=pending,
             records=records,
             aborted=aborted,
             abort_reason=abort_reason,

@@ -280,7 +280,7 @@ def _build_latex_qa(context: GateContext) -> ReviewGate:
     tetap ada — sebagai pass-through.** Bab yang melewati tahap ini harus terlihat
     sebagai bab yang melewatinya, bukan sebagai bab yang tidak pernah punya tahap
     itu. Keputusan "boleh mengompilasi atau tidak" diambil composition root,
-    karena hanya ia yang tahu apakah ``latexmk`` ada di ``PATH`` — gate yang
+    karena hanya ia yang tahu apakah perkakas LaTeX dapat dijalankan — gate yang
     memeriksa ``PATH`` sendiri adalah gate yang tidak dapat diuji tanpa mesin ini.
 
     Peran ``latex`` tetap dipakai di sini: yang memperbaiki adalah model yang sama

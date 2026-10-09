@@ -145,6 +145,26 @@ class GatePreconditionError(DomainError):
         )
 
 
+class ApprovalNotPossibleError(DomainError):
+    """Bab diminta disetujui atau ditolak padahal belum sampai tahap itu (§44).
+
+    Kesalahan **pemakaian**, bukan kesalahan programmer: yang salah adalah
+    urutan perintahnya. Bab yang belum ditulis tidak dapat disetujui, dan
+    menjawab "statusnya tidak sah" akan menyuruh pembacanya memeriksa konfigurasi
+    yang sebenarnya tidak salah. Karena itu pesannya menunjuk apa yang harus
+    dijalankan lebih dulu — sama seperti :class:`BookNotPlannedError`.
+    """
+
+    def __init__(self, number: int, status: object, *, action: str = "disetujui") -> None:
+        self.number = number
+        self.status = status
+        self.action = action
+        super().__init__(
+            f"Bab {number} belum dapat {action}: statusnya {status}. "
+            f"Kerjakan dulu dengan 'run' sampai babnya selesai ditulis, lalu ulangi."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Kegagalan infrastruktur
 # ---------------------------------------------------------------------------

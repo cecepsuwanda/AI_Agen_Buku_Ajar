@@ -36,6 +36,7 @@ from domain.enums import ChapterEvent, ChapterStatus
 from domain.errors import ChapterNotPlannedError, InvalidGateError
 from domain.rules import (
     approved_terminology,
+    awaiting_approval,
     find_chapter,
     foreign_citations,
     pending_numbers,
@@ -45,6 +46,7 @@ from domain.rules import (
     reset_for_rerun,
     validate_gates,
     with_gate_result,
+    with_human_rejection,
 )
 from domain.state import BookState
 from domain.transitions import can_advance, transition
@@ -606,3 +608,168 @@ def test_terms_of_different_reviews_are_merged_rather_than_replaced() -> None:
     second = ReviewResult(gate="b", approved=True, score=9, terminology={"Regex": "Definisi."})
 
     assert tuple(approved_terminology(_reviewed(first, second))) == ("DFA", "Regex")
+
+
+# ---------------------------------------------------------------------------
+# Vonis yang menunggu keputusan manusia — §44
+# ---------------------------------------------------------------------------
+def _blocked(gate: str = "human_approval", number: int = 1) -> ReviewResult:
+    """Vonis "menunggu", apa adanya: tidak lulus, tidak ditolak."""
+    return ReviewResult(
+        gate=gate,
+        approved=False,
+        blocked=True,
+        feedback=(f"Bab {number} menunggu persetujuan manusia.",),
+    )
+
+
+def test_a_waiting_verdict_leaves_status_and_revision_alone() -> None:
+    """Yang belum ada hanyalah keputusan, bukan babnya.
+
+    Mengirim bab yang menunggu ke antrean revisi akan menulis ulang bab yang
+    tidak dikeluhkan siapa pun, dan menghabiskan jatah revisi yang seharusnya
+    dipakai untuk keluhan yang sungguhan.
+    """
+    record = make_record(1, ChapterStatus.REVIEWED, research=RESEARCH, draft=DRAFT)
+
+    waiting = with_gate_result(record, _blocked(), produces=ChapterStatus.APPROVED)
+
+    assert waiting.status is ChapterStatus.REVIEWED
+    assert waiting.revision == 0
+    assert waiting.reviews == (_blocked(),)
+
+
+def test_a_waiting_verdict_does_not_require_a_valid_produces() -> None:
+    """Vonis yang menunggu tidak memindahkan apa pun, jadi tidak ada yang divalidasi.
+
+    Gate §44 berdiri di ujung rantai; memaksanya menyatakan ``produces`` yang
+    sah dari status sekarang akan menolak justru pada keadaan yang paling
+    normal — bab yang sudah sampai ``LATEX_COMPILED`` dan tinggal menunggu
+    pembacanya.
+    """
+    record = make_record(1, ChapterStatus.DRAFTED, research=RESEARCH, draft=DRAFT)
+
+    waiting = with_gate_result(record, _blocked(), produces=ChapterStatus.APPROVED)
+
+    assert waiting.status is ChapterStatus.DRAFTED
+
+
+def test_a_repeated_waiting_verdict_replaces_the_previous_one() -> None:
+    """``run`` yang dijalankan berkali-kali selama dosen memeriksa tidak menumpuk.
+
+    Setiap ``run`` menemukan bab yang sama di tempat yang sama dan menulis vonis
+    menunggu yang sama. Menambahkannya berarti berkas state tumbuh satu baris per
+    ``run`` — kebisingan yang menyembunyikan perubahan yang sungguhan.
+    """
+    record = make_record(1, ChapterStatus.REVIEWED, draft=DRAFT)
+
+    twice = with_gate_result(
+        with_gate_result(record, _blocked(), produces=ChapterStatus.APPROVED),
+        _blocked(),
+        produces=ChapterStatus.APPROVED,
+    )
+
+    assert len(twice.reviews) == 1
+
+
+def test_a_waiting_verdict_from_another_gate_is_not_replaced() -> None:
+    """Yang diganti hanyalah vonis menunggu **dari gate yang sama**.
+
+    Dua gate yang sama-sama menunggu berarti dua hal yang berbeda harus
+    diputuskan; menghapus yang pertama akan menghilangkan permintaan yang belum
+    dipenuhi.
+    """
+    first = with_gate_result(
+        make_record(1, ChapterStatus.REVIEWED, draft=DRAFT),
+        _blocked("human_approval"),
+        produces=ChapterStatus.APPROVED,
+    )
+
+    second = with_gate_result(first, _blocked("lain_gate"), produces=ChapterStatus.APPROVED)
+
+    assert [review.gate for review in second.reviews] == ["human_approval", "lain_gate"]
+
+
+def test_only_a_waiting_last_verdict_counts_as_waiting() -> None:
+    """Bab yang terputus di tengah rantai bukan bab yang menunggu pembaca.
+
+    Keduanya dapat berhenti pada status yang sama; yang membedakannya là vonis
+    terakhirnya. Membaca statusnya saja akan melaporkan bab yang rusak sebagai
+    bab yang selesai dikerjakan.
+    """
+    approved = ReviewResult(gate="reviewer", approved=True, score=9)
+
+    assert awaiting_approval(make_record(1, ChapterStatus.REVIEWED, draft=DRAFT)) is False
+    assert awaiting_approval(_reviewed(approved)) is False
+
+    waiting = _reviewed(approved, _blocked())
+    assert awaiting_approval(waiting) is True
+
+
+def test_a_waiting_verdict_followed_by_an_ordinary_one_stops_counting() -> None:
+    """Setelah manusianya memutuskan, babnya tidak lagi menunggu.
+
+    Inilah yang membuat ``run`` berikutnya tidak menghentikannya lagi: vonis
+    persetujuan manusia berdiri **sesudah** vonis yang menunggu.
+    """
+    decided = _reviewed(
+        _blocked(),
+        ReviewResult(gate="human_approval", approved=True, score=9),
+    )
+
+    assert awaiting_approval(decided) is False
+
+
+def test_rejecting_an_approved_chapter_returns_it_to_the_writer() -> None:
+    """Jalur yang tidak dimiliki gate mana pun (§44).
+
+    Bab yang sudah ``APPROVED`` tidak lagi dilewati gate, jadi tidak ada jalur
+    otomatis yang dapat mengembalikannya ke penulis. Pekerjaannya tidak dibuang:
+    riset dan drafnya tetap ada, dan yang bertambah hanyalah satu revisi.
+    """
+    record = make_record(1, ChapterStatus.APPROVED, research=RESEARCH, draft=DRAFT)
+    record = record.model_copy(update={"markdown_path": "output/chapters/chapter01.md"})
+    verdict = ReviewResult(gate="human_approval", approved=False, feedback=("Contohnya keliru.",))
+
+    rejected = with_human_rejection(record, verdict)
+
+    assert rejected.status is ChapterStatus.REVISION
+    assert rejected.revision == 1
+    assert rejected.markdown_path is None
+    assert rejected.draft == DRAFT
+    assert rejected.research == RESEARCH
+    assert rejected.reviews[-1] is verdict
+
+
+def test_rejecting_a_waiting_chapter_also_returns_it_to_the_writer() -> None:
+    """Keadaan yang sama dengan gate §44 aktif: babnya menunggu, lalu ditolak."""
+    record = with_gate_result(
+        make_record(1, ChapterStatus.LATEX_COMPILED, research=RESEARCH, draft=DRAFT),
+        _blocked(),
+        produces=ChapterStatus.APPROVED,
+    )
+    verdict = ReviewResult(
+        gate="human_approval", approved=False, feedback=("Bagian 3 terlalu cepat.",)
+    )
+
+    rejected = with_human_rejection(record, verdict)
+
+    assert rejected.status is ChapterStatus.REVISION
+    assert rejected.revision == 1
+    assert awaiting_approval(rejected) is False
+
+
+def test_a_chapter_that_is_not_approved_can_still_be_rejected() -> None:
+    """Rantai yang dipendekkan konfigurasi tidak boleh membuat perintahnya mati.
+
+    ``REVISION`` ditulis langsung alih-alih lewat tabel §27, dan itu memang
+    disengaja: tidak ada gate yang ``produces``-nya ``REVISION``.
+    """
+    verdict = ReviewResult(gate="human_approval", approved=False, feedback=("Ulang.",))
+
+    for status in (ChapterStatus.DRAFTED, ChapterStatus.REVIEWED):
+        rejected = with_human_rejection(
+            make_record(1, status, research=RESEARCH, draft=DRAFT), verdict
+        )
+        assert rejected.status is ChapterStatus.REVISION
+        assert rejected.revision == 1

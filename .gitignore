@@ -240,10 +240,25 @@ state/
 # biner yang tidak dapat dibaca siapa pun.
 knowledge/
 
+# --- CATATAN PENTING (§39) ---------------------------------------------------
+# output/ SENGAJA TIDAK di-ignore: source buku (Markdown hari ini, LaTeX nanti)
+# harus berada di Git agar revisi AI dapat dilacak per bab.
+# Lihat blueprint §39 dan README.
+#
+# Dua baris ini HARUS berada SEBELUM aturan berkas bantu LaTeX di bawah, dan
+# `git status` yang membuktikannya: aturan gitignore yang terakhir cocok yang
+# menang, jadi `!output/**` yang diletakkan paling bawah akan membatalkan
+# seluruh aturan `output/latex/**/*.aux` di atasnya — diam-diam, karena
+# gitignore tidak pernah mengeluh tentang aturan yang saling membatalkan.
+!output/
+!output/**
+
 # --- Berkas bantu LaTeX (§25, §26) -------------------------------------------
 # Turunan kompilasi: setiap `.tex` yang berubah menghasilkan ulang semuanya, dan
 # menyimpannya membuat diff berisik tanpa satu pun informasi. `*.log` sudah
-# tertutup di bagian "Django stuff" di atas — daftar ini melengkapinya.
+# tertutup di bagian "Django stuff" di atas — tetapi `!output/**` di atasnya
+# membatalkannya, jadi `.log` diulang di sini. Urutannya bukan kerapian: aturan
+# gitignore yang terakhir cocok yang menang.
 #
 # Sengaja DIBATASI pada `output/latex/`, bukan pola global `*.aux`. `input/`
 # adalah milik pengguna — blueprint §42 menyebut `input/source_latex/` sebagai
@@ -253,6 +268,7 @@ knowledge/
 # Yang TIDAK di-ignore, dan itu disengaja (§39): `output/latex/**/*.tex`,
 # `references.bib`, dan `book.pdf` — ketiganya adalah hasil kerja.
 output/latex/**/*.aux
+output/latex/**/*.log
 output/latex/**/*.out
 output/latex/**/*.fls
 output/latex/**/*.fdb_latexmk
@@ -274,10 +290,3 @@ output/latex/**/*.xdv
 # membuktikan bahwa harapan itu benar adalah `tests/live/test_latex_compile.py`,
 # yang mengompilasi sungguhan dan membandingkannya.
 !tests/data/latex_logs/*.log
-
-# --- CATATAN PENTING (§39) ---------------------------------------------------
-# output/ SENGAJA TIDAK di-ignore: source buku (Markdown hari ini, LaTeX nanti)
-# harus berada di Git agar revisi AI dapat dilacak per bab.
-# Lihat blueprint §39 dan README.
-!output/
-!output/**

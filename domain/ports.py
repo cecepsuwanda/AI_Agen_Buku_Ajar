@@ -58,6 +58,16 @@ class ChatRequest:
     stop: tuple[str, ...] = ()
     role: str = "unknown"  # hanya untuk logging (§38)
     prompt_version: str = "0"
+    #: Penanda bahan yang ikut menentukan permintaan ini — id potongan bukti yang
+    #: diambil dari basis pengetahuan (§13). Kosong berarti permintaan itu memang
+    #: tidak memakai retrieval. **Hanya untuk logging (§38)**: adapter tidak
+    #: membacanya, dan ia tidak masuk ke prompt dengan sendirinya.
+    #:
+    #: Ada di sini, bukan disimpulkan dari ``user``: potongan yang dikirim ke
+    #: model sudah diratakan menjadi teks bernomor, dan menebak kembali id-nya
+    #: dari teks itu berarti menebak. §38 menyebut "retrieved sources" sebagai
+    #: hal yang dicatat, dan yang mencatat tidak boleh menebak.
+    sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

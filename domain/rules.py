@@ -105,8 +105,29 @@ def with_gate_result(
     draf hasil kerja gate yang ditolak akan menjadi "draf terakhir" yang justru
     tidak pernah disetujui siapa pun.
 
+    Vonis ``blocked`` (§44) adalah cabang ketiga, dan ia **tidak menyentuh
+    status maupun penghitung revisi**. Bab yang menunggu keputusan manusia bukan
+    bab yang ditolak: mengembalikannya ke revisi akan menulis ulang bab yang
+    tidak ada yang mengeluh tentangnya, dan menghabiskan anggaran revisi untuk
+    sesuatu yang bukan kesalahan penulis. Yang bertambah hanyalah vonisnya —
+    supaya pembaca ``state/chapterNN.json`` dapat melihat bahwa bab itu berhenti
+    di sana karena menunggu, bukan karena terputus.
+
+    Vonis menunggu yang **berulang** tidak menumpuk: ``run`` yang dijalankan
+    berkali-kali selama dosen memeriksa PDF-nya akan menambahkan vonis yang
+    sama-sama menunggu pada setiap jalankan, dan berkas state yang tumbuh satu
+    baris per ``run`` adalah kebisingan yang menyembunyikan perubahan yang
+    sungguhan. Karena itu vonis menunggu dari gate yang sama yang sudah menjadi
+    vonis terakhir **diganti**, bukan ditambahkan.
+
     :raises InvalidGateError: bila ``produces`` bukan kemajuan yang sah.
     """
+    if result.blocked:
+        reviews = record.reviews
+        if reviews and reviews[-1].gate == result.gate and reviews[-1].blocked:
+            reviews = reviews[:-1]
+        return record.model_copy(update={"reviews": (*reviews, result)})
+
     if result.approved:
         if not can_advance(record.status, produces):
             raise InvalidGateError(result.gate, record.status, produces)
@@ -124,6 +145,48 @@ def with_gate_result(
             "status": transition(record.status, ChapterEvent.REVIEW_FAIL),
             "reviews": (*record.reviews, result),
             "revision": record.revision + 1,
+        }
+    )
+
+
+def awaiting_approval(record: ChapterRecord) -> bool:
+    """True bila bab berhenti karena menunggu keputusan manusia (§44) (MURNI).
+
+    Dibaca dari **vonis terakhir**, bukan dari statusnya. Bab yang terputus di
+    tengah rantai dapat berhenti di status yang sama — ``LATEX_COMPILED`` —
+    tanpa ada yang menunggu apa pun, dan menghitungnya sebagai "menunggu
+    persetujuan" akan melaporkan bab yang rusak sebagai bab yang selesai
+    dikerjakan. Yang membedakan keduanya adalah vonis yang menunggu itu sendiri.
+    """
+    last = record.last_review()
+    return last is not None and last.blocked
+
+
+def with_human_rejection(record: ChapterRecord, verdict: ReviewResult) -> ChapterRecord:
+    """Kembalikan bab ke antrean revisi atas keputusan manusia (§44) (MURNI).
+
+    Berbeda dari :func:`with_gate_result` dalam satu hal, dan itulah alasan
+    fungsi ini ada: transisi ``REVIEW_FAIL`` sengaja **tidak berlaku dari
+    ``APPROVED``** — kegagalan sistem tidak boleh mencabut persetujuan yang sudah
+    diberikan. Keputusan manusia tentu boleh, dan justru itulah gunanya: dosen
+    yang membaca hasil akhir dan menolaknya harus dapat mengembalikan babnya ke
+    penulis tanpa membuang seluruh pekerjaan sebelumnya.
+
+    Statusnya ditulis **langsung** ke ``REVISION``, sebagaimana
+    :func:`reset_for_rerun` dan :func:`reopen_failed` juga melakukannya. Ini bukan
+    langkah pipeline — tidak ada gate yang ``produces``-nya ``REVISION`` — jadi
+    tidak ada baris tabel §27 yang seharusnya mewakilinya.
+    """
+    return record.model_copy(
+        update={
+            "status": ChapterStatus.REVISION,
+            "reviews": (*record.reviews, verdict),
+            "revision": record.revision + 1,
+            # Markdown bab yang ditolak masih ada di ``output/`` sampai babnya
+            # ditulis ulang. Jalurnya dibuang dari record supaya tidak ada satu
+            # pun pembaca yang mengira deliverable-nya sudah beres.
+            "markdown_path": None,
+            "error": None,
         }
     )
 

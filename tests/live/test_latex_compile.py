@@ -14,7 +14,7 @@ pun, dan ia berbentuk dua bagian:
    sendiri. Bila MiKTeX menuliskannya dengan bentuk lain, tidak ada satu pun tes
    offline yang akan menangkapnya.
 2. **Apakah kompilasi sungguhan berhasil** — potongan bab maupun buku utuh
-   menjadi PDF. Ini bergantung pada mesin ini punya ``latexmk`` **yang dapat
+   menjadi PDF. Ini bergantung pada mesin ini punya perkakas LaTeX **yang dapat
    dijalankan**, dan itulah sebabnya bagian ini di-*skip* bila tidak.
 
 Bila perkakas yang dibutuhkan tidak ada, tesnya **skip**, bukan gagal: mesin tanpa
@@ -37,17 +37,17 @@ from domain.latex import (
     render_main_tex,
 )
 from latex.artifacts import FileLatexArtifacts, templates_dir
-from latex.compiler import LatexmkCompiler
+from latex.compiler import LatexToolchainCompiler
 from latex.validator import parse_log
 
 pytestmark = pytest.mark.live
 
 CORMEN = "Cormen, Introduction to Algorithms, 4th ed."
 
-#: Nama perkakas. ``pdflatex`` dipakai langsung untuk membuktikan **parser log**;
-#: ``latexmk`` dipakai untuk membuktikan **kompilasi utuh**.
+#: Nama perkakas. Kedua bagian menjalankan ``pdflatex`` — bagian 1 langsung,
+#: untuk membuktikan **parser log**-nya; bagian 2 lewat adapter, yang menambahkan
+#: ``bibtex`` di antara lintasannya lewat :func:`~domain.latex.latex_passes`.
 PDFLATEX = "pdflatex"
-LATEXMK = "latexmk"
 
 #: Batas waktu kompilasi. Dinaikkan dari bawaan karena tes ini membayar cold
 #: start ``pdflatex`` di mesin yang baru saja dinyalakan.
@@ -74,7 +74,8 @@ Lihat \\ref{bab:9} dan \\cite{kunci-karangan}.
 
 #: Dokumen bersih — tetapi rujukannya ke depan, jadi ia baru bersih pada
 #: kompilasi **kedua**: ``\\ref`` baru menemukan ``\\label`` setelah ``.aux``
-#: dibaca. Itu bukan keanehan tes ini melainkan alasan ``latexmk`` ada.
+#: dibaca. Itu bukan keanehan tes ini melainkan alasan rencana kompilasi
+#: menjalankan LaTeX lebih dari sekali.
 CLEAN_DOC = """\\documentclass{book}
 \\begin{document}
 \\chapter{Bab Satu}\\label{bab:1}
@@ -100,7 +101,7 @@ CHAPTER = (
 
 
 # ---------------------------------------------------------------------------
-# Bagian 1 — log sungguhan, tanpa ``latexmk``
+# Bagian 1 — log sungguhan, tanpa adapter
 # ---------------------------------------------------------------------------
 def _compile_with(engine: str, tex: str, directory: Path, *, passes: int = 1) -> str:
     """Jalankan ``engine`` atas ``tex`` dan kembalikan isi berkas ``.log``-nya.
@@ -144,8 +145,8 @@ def test_a_real_miktex_log_reports_real_warnings_in_their_own_buckets(tmp_path: 
     LaTeX membaca ``.aux`` dari kompilasi **sebelumnya**: pada lintasan pertama
     berkas itu belum ada, dan yang muncul justru "Label(s) may have changed.
     Rerun". Karena itu ``parse_log`` tidak dapat diharapkan menemukannya dari satu
-    lintasan — dan justru itulah alasan kompilasi dijalankan lewat ``latexmk``,
-    yang mengulang sampai berkas bantunya tenang.
+    lintasan — dan justru itulah alasan rencana kompilasi menjalankan LaTeX
+    beberapa kali, bukan sekali.
     """
     log = _compile_with(PDFLATEX, WARNING_DOC, tmp_path, passes=2)
 
@@ -174,11 +175,11 @@ def test_a_real_clean_run_parses_clean_on_the_second_pass(tmp_path: Path) -> Non
 # Bagian 2 — kompilasi utuh, lewat adapter
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def compiler(tmp_path: Path) -> LatexmkCompiler:
+def compiler(tmp_path: Path) -> LatexToolchainCompiler:
     """Compiler sungguhan, atau lewati tesnya bila perkakasnya tidak dapat dijalankan."""
-    made = LatexmkCompiler(tmp_path / "latex", timeout_s=TIMEOUT_S)
+    made = LatexToolchainCompiler(tmp_path / "latex", timeout_s=TIMEOUT_S)
     if not made.available():
-        pytest.skip(f"{LATEXMK} tidak ada atau tidak dapat dijalankan di mesin ini")
+        pytest.skip(f"perkakas LaTeX ({PDFLATEX}) tidak dapat dijalankan di mesin ini")
     return made
 
 
@@ -187,7 +188,7 @@ def _with_real_key(chapter: str) -> tuple[str, tuple[str, ...]]:
     return (chapter.replace("KUNCI", citation_key(CORMEN)), (CORMEN,))
 
 
-def test_a_clean_fragment_really_compiles(compiler: LatexmkCompiler) -> None:
+def test_a_clean_fragment_really_compiles(compiler: LatexToolchainCompiler) -> None:
     """Yang dibuktikan: perkakasnya berhenti dengan kode 0 dan menghasilkan PDF."""
     chapter, sources = _with_real_key(CHAPTER)
 
@@ -199,7 +200,7 @@ def test_a_clean_fragment_really_compiles(compiler: LatexmkCompiler) -> None:
     assert not result.errors
 
 
-def test_an_unescaped_ampersand_really_fails(compiler: LatexmkCompiler) -> None:
+def test_an_unescaped_ampersand_really_fails(compiler: LatexToolchainCompiler) -> None:
     """Bentuk galat yang paling sering ditangani tangga perbaikan §26."""
     chapter, sources = _with_real_key(CHAPTER.replace("\\&", "&"))
 
@@ -210,7 +211,7 @@ def test_an_unescaped_ampersand_really_fails(compiler: LatexmkCompiler) -> None:
 
 
 def test_a_citation_without_a_bibliography_entry_is_reported_by_latex(
-    compiler: LatexmkCompiler,
+    compiler: LatexToolchainCompiler,
 ) -> None:
     """``\\cite`` yang menggantung adalah temuan yang **menahan** bab (§26)."""
     invented = citation_key("Buku yang Tidak Pernah Ada")
@@ -221,7 +222,10 @@ def test_a_citation_without_a_bibliography_entry_is_reported_by_latex(
     assert build_problems(result)
 
 
-def test_the_whole_book_is_assembled_into_a_pdf(compiler: LatexmkCompiler, tmp_path: Path) -> None:
+def test_the_whole_book_is_assembled_into_a_pdf(
+    compiler: LatexToolchainCompiler,
+    tmp_path: Path,
+) -> None:
     """Perakitan ``main.tex`` + bab + daftar pustaka, sampai PDF-nya ada (§42)."""
     chapter, sources = _with_real_key(CHAPTER)
     artifacts = FileLatexArtifacts(compiler.latex_dir)

@@ -16,7 +16,7 @@ sama persis dengan pasangan yang sudah ada untuk Markdown
   byte-per-byte.
 
 Seluruh fungsi di sini murni: masuk string, keluar string. Tidak ada berkas,
-tidak ada ``subprocess``, dan tidak ada ``latexmk`` — menulis ``.tex`` adalah
+tidak ada ``subprocess``, dan tidak ada perkakas LaTeX — menulis ``.tex`` adalah
 pekerjaan adapter ``latex/``, dan mengompilasinya adalah pekerjaan
 ``latex/compiler.py`` (§26). Yang tinggal di sini justru keputusan yang memang
 milik program, bukan milik perkakas: menilai apakah hasil kompilasi dapat
@@ -169,7 +169,7 @@ class LatexBuildResult(FrozenModel):
     melaporkan sukses, dan kedelapan jenis masalah §26 yang terbaca dari log
     dikelompokkan ke field-nya masing-masing. Yang memutuskan apakah hasil ini
     dapat diterima adalah :func:`build_problems` — pemisahan itu disengaja,
-    karena "latexmk keluar dengan kode 0" dan "buku ini tidak punya sitasi
+    karena "kompilasi keluar dengan kode 0" dan "buku ini tidak punya sitasi
     menggantung" adalah dua hal yang berbeda, dan menyatukannya menjadi satu
     boolean berarti salah satunya akan hilang.
 
@@ -949,6 +949,108 @@ def _marker_index(lines: Sequence[str], marker: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Rencana kompilasi: berapa kali dan dengan program apa (§25, §26)
+# ---------------------------------------------------------------------------
+#: Nama program BibTeX. Konstanta, bukan argumen: seluruh mesin LaTeX mengenal
+#: nama ini, dan menjadikannya dapat dikonfigurasi hanya akan menambah satu cara
+#: untuk salah ketik pada berkas yang tidak dipakai siapa pun kecuali pengguna
+#: yang sudah tahu apa yang ia lakukan.
+BIBTEX_PROGRAM = "bibtex"
+
+#: Mesin yang **mengurus pengulangannya sendiri** — satu perintah, selesai.
+#:
+#: ``latexmk`` memeriksa ``.aux``/``.bbl``/``.toc``, menghitung berapa kali perlu
+#: diulang, dan menjalankan BibTeX pada saatnya. Menjalankannya tiga kali justru
+#: salah: ia akan mengulang pemeriksaan yang sama tiga kali.
+#:
+#: Sayangnya ia adalah skrip Perl, dan di mesin yang tidak punya ``perl`` di
+#: ``PATH`` ia tidak berjalan sama sekali — lihat
+#: :meth:`~latex.compiler.LatexToolchainCompiler.available`. Karena itu daftar ini
+#: boleh berisi lebih dari satu nama, dan mesin di luarnya diperlakukan sebagai
+#: mesin yang harus diulang sendiri oleh pemanggilnya.
+SELF_DRIVING_ENGINES: frozenset[str] = frozenset({"latexmk"})
+
+
+class LatexPass(FrozenModel):
+    """Satu langkah kompilasi (MURNI).
+
+    ``note`` bukan hiasan: ketika kompilasi gagal pada langkah ketiga, yang
+    dibaca orang pertama kali adalah "gagal pada langkah yang mana". Perintah
+    mentahnya tidak menjawab itu — ``bibtex main`` terlihat sama pentingnya
+    dengan ``pdflatex main.tex`` bagi siapa pun yang tidak menghafal urutannya.
+    """
+
+    program: str
+    argv: tuple[str, ...]
+    note: str
+
+
+def latex_passes(
+    *,
+    engine: str,
+    jobname: str,
+    bibliography: bool = False,
+    bibtex: str = BIBTEX_PROGRAM,
+) -> tuple[LatexPass, ...]:
+    """Langkah-langkah kompilasi untuk sebuah mesin (MURNI).
+
+    Mengapa jumlah langkahnya bergantung pada mesinnya, bukan pada selera:
+    ``latexmk`` tahu sendiri berapa kali ia harus diulang, sedangkan ``pdflatex``
+    tidak. Menjalankan ``pdflatex`` sekali menghasilkan PDF yang seluruh ``\\ref``
+    dan ``\\cite``-nya bertanda tanya — PDF yang **ada**, dan justru itu bahayanya:
+    ia terlihat seperti hasil kerja yang selesai.
+
+    Urutan untuk mesin satu-langkah, dan alasan tiap langkahnya:
+
+    1. ``pdflatex`` — menulis ``.aux`` (label dan sitasi yang dipakai), lalu gagal
+       pada setiap rujukan yang belum punya tujuan.
+    2. ``bibtex`` — membaca ``.aux`` dan menulis ``.bbl``. Hanya dijalankan bila
+       dokumennya memang punya ``\\bibliography``: BibTeX pada ``.aux`` tanpa satu
+       pun ``\\citation`` keluar dengan kode galat, dan kegagalan itu akan
+       dilaporkan sebagai kegagalan buku.
+    3. ``pdflatex`` — membaca ``.bbl``, sehingga ``\\cite`` berhenti menjadi tanda
+       tanya.
+    4. ``pdflatex`` — **bukan pengulangan yang berlebihan**: daftar pustaka yang
+       baru masuk menggeser nomor halaman, dan nomor halaman itulah yang ditulis
+       ulang pada lintasan ketiga. Buku tanpa BibTeX cukup dua lintasan; buku
+       dengan BibTeX butuh tiga.
+
+    :param bibliography: apakah dokumennya memuat ``\\bibliography``. Ditanyakan
+        pemanggil, bukan ditebak dari nama berkas: ``.bib`` yang ada tetapi tidak
+        dirujuk tetap bukan alasan menjalankan BibTeX.
+    """
+    if engine in SELF_DRIVING_ENGINES:
+        return (
+            LatexPass(
+                program=engine,
+                argv=(engine, "-pdf", "-interaction=nonstopmode", f"{jobname}.tex"),
+                note=f"{engine} mengurus pengulangan dan BibTeX sendiri",
+            ),
+        )
+
+    latex = LatexPass(
+        program=engine,
+        argv=(engine, "-interaction=nonstopmode", f"{jobname}.tex"),
+        note="lintasan LaTeX; menulis .aux",
+    )
+    if not bibliography:
+        return (latex, latex.model_copy(update={"note": "lintasan kedua; menyelesaikan \\ref"}))
+
+    return (
+        latex,
+        LatexPass(
+            program=bibtex,
+            argv=(bibtex, jobname),
+            note="BibTeX membaca .aux dan menulis .bbl",
+        ),
+        latex.model_copy(update={"note": "lintasan kedua; membaca .bbl"}),
+        latex.model_copy(
+            update={"note": "lintasan ketiga; memperbaiki nomor halaman setelah daftar pustaka"}
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Pencocokan nomor bab
 # ---------------------------------------------------------------------------
 def lock_chapter_number(
@@ -997,10 +1099,13 @@ def _fingerprint(text: str) -> str:
 
 
 __all__ = [
+    "BIBTEX_PROGRAM",
     "CHAPTER_BLOCK_BEGIN",
     "CHAPTER_BLOCK_END",
+    "SELF_DRIVING_ENGINES",
     "LatexBuildResult",
     "LatexChapter",
+    "LatexPass",
     "bibliography_entries",
     "bibliography_sources",
     "build_advisories",
@@ -1015,6 +1120,7 @@ __all__ = [
     "extract_labels",
     "extract_ref_keys",
     "inspect_latex",
+    "latex_passes",
     "lock_chapter_number",
     "log_excerpt",
     "render_bibliography",

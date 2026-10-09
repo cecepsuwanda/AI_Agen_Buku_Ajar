@@ -91,12 +91,12 @@ class GateContext:
     #: ``latex`` meski keduanya berbicara tentang LaTeX: yang satu menulis
     #: berkas, yang lain menjalankan program. Composition root memutuskan
     #: keduanya secara terpisah, karena keduanya memang dapat gagal secara
-    #: terpisah — direktori keluaran selalu dapat ditulis, sedangkan ``latexmk``
-    #: belum tentu terpasang.
+    #: terpisah — direktori keluaran selalu dapat ditulis, sedangkan perkakas
+    #: LaTeX belum tentu dapat dijalankan.
     #:
     #: ``None`` berarti gate §26 mengembalikan pass-through: sumber LaTeX-nya
     #: tetap ditulis, tetapi tidak ada yang mengompilasinya. Yang memutuskannya
-    #: adalah composition root — ``latexmk`` yang diperiksa langsung oleh gate
+    #: adalah composition root — perkakas LaTeX yang diperiksa langsung oleh gate
     #: adalah gate yang tidak dapat diuji tanpa mesin ini.
     compiler: LatexCompiler | None = None
 

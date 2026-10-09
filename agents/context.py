@@ -87,10 +87,29 @@ def evidence_lines(evidence: Sequence[Evidence]) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def evidence_ref(item: Evidence) -> str:
+    """Penanda satu potongan bukti tanpa isinya (MURNI).
+
+    Bagian kepala yang sama dengan :func:`evidence_lines`, tanpa nomor urut dan
+    tanpa teksnya — karena yang dibutuhkan di sini bukan bacaan bagi model
+    melainkan **identitas** bagi catatan §38: potongan mana yang ikut menentukan
+    jawaban ini. Menyalin teksnya akan menggandakan isi buku ke dalam berkas log;
+    menyebut nomor urutnya saja akan kehilangan arti begitu urutannya berubah di
+    bab berikutnya.
+    """
+    parts = [item.source]
+    if item.section.strip():
+        parts.append(item.section.strip())
+    if item.page is not None:
+        parts.append(f"hlm. {item.page}")
+    return " — ".join(parts)
+
+
 __all__ = [
     "book_language",
     "book_title",
     "evidence_lines",
+    "evidence_ref",
     "summaries_before",
     "terminology_lines",
 ]

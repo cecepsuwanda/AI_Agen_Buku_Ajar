@@ -2,8 +2,9 @@
 
 Log kompilasi sudah melaporkan ``\\ref`` dan ``\\cite`` yang menggantung. Berkas
 ini ada karena pemeriksaan itu **juga harus bekerja di mesin tanpa LaTeX** — dan
-justru di situlah isyaratnya paling dibutuhkan. Kalau ``latexmk`` tidak terpasang
-atau gagal sebelum sempat menulis log, satu-satunya cara mengetahui bahwa bab 5
+justru di situlah isyaratnya paling dibutuhkan. Kalau perkakas LaTeX-nya tidak
+dapat dijalankan atau gagal sebelum sempat menulis log, satu-satunya cara
+mengetahui bahwa bab 5
 mengutip kunci yang tidak pernah masuk ``references.bib`` adalah memeriksanya
 sendiri.
 

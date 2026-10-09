@@ -1,7 +1,7 @@
 """Parser log LaTeX menjadi :class:`~domain.latex.LatexBuildResult` (§26).
 
 Fungsi di berkas ini **murni terhadap teks**: masuk satu string log, keluar satu
-objek; tidak ada berkas yang dibuka dan tidak ada ``latexmk`` yang dijalankan.
+objek; tidak ada berkas yang dibuka dan tidak ada LaTeX yang dijalankan.
 Itulah yang membuat kedelapan jenis masalah §26 dapat diuji dengan berkas log
 contoh di ``tests/data/latex_logs/`` — termasuk masalah yang perkakas LaTeX-nya
 belum tentu terpasang di mesin yang menjalankan tes. Kompilasi sungguhannya

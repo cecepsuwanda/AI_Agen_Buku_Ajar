@@ -48,16 +48,38 @@ class RunReport(FrozenModel):
 
     Dipakai CLI untuk mencetak "6 dari 8 bab disetujui; 2 gagal" beserta
     alasannya, dan untuk menentukan exit code.
+
+    ``pending`` adalah bab yang berhenti karena **menunggu keputusan manusia**
+    (§44), dan ia berdiri sendiri alih-alih dilebur ke ``failed`` karena dua hal
+    yang menuntut tindakan berbeda. Bab yang gagal meminta penyebabnya diperbaiki
+    dan ``run`` dijalankan lagi; bab yang menunggu meminta seseorang membaca
+    hasilnya dan menjalankan ``approve``. Menggabungkannya juga akan membuat
+    ``exit_code`` bernilai 1 untuk buku yang sesungguhnya sudah selesai
+    dikerjakan — dan itu membuat skrip apa pun yang memeriksa kode keluar
+    melaporkan kegagalan yang tidak ada.
+
+    Keempat angka itu tetap menjumlah tepat ke ``total``:
+
+    * ``approved`` — record ada dan disetujui.
+    * ``pending`` — record ada dan sedang menunggu keputusan manusia.
+    * ``failed`` — record ada, tidak disetujui, dan tidak menunggu apa pun.
+    * ``skipped`` — belum pernah disentuh.
     """
 
     total: int = 0
     approved: int = 0
     failed: int = 0
     skipped: int = 0
+    pending: int = 0
     records: tuple[ChapterRecord, ...] = ()
     aborted: bool = False
     abort_reason: str | None = None
 
     def exit_code(self) -> int:
-        """0 bila bersih, 1 bila ada bab gagal atau proses dibatalkan."""
+        """0 bila bersih, 1 bila ada bab gagal atau proses dibatalkan.
+
+        Bab yang menunggu persetujuan **bukan** kegagalan: ia adalah pekerjaan
+        yang berhenti tepat di tempat yang seharusnya, menunggu orang yang
+        memang harus memutuskan.
+        """
         return 1 if (self.failed or self.aborted) else 0

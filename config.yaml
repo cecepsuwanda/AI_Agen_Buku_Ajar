@@ -38,7 +38,7 @@ book:
     contoh, dan diakhiri latihan.
 
 pipeline:
-  # Rantai status di build ini berisi 12 tahap: sepuluh dari §27, ditambah dua
+  # Rantai status di build ini berisi 13 tahap: sebelas dari §27, ditambah dua
   # tahap penulisan yang blueprint sendiri letakkan sesudah Chapter Writer
   # (§19 Example Agent, §20 Exercise Agent). Seluruh tahap yang menghasilkan
   # status kini punya gate-nya sendiri — tidak ada lagi placeholder.
@@ -58,7 +58,7 @@ pipeline:
   # `latex_qa` menutup tahap LaTeX (§26): ia mengompilasi potongan yang baru
   # saja ditulis `latex_writer`, dan bila gagal ia memperbaiki lebih dulu
   # sebelum menolak. Ia menjadi pass-through bila `latex.enabled: false` ATAU
-  # bila `latexmk` tidak ada di PATH.
+  # bila perkakas LaTeX-nya tidak dapat dijalankan di mesin ini.
   #
   # `pedagogy_reviewer` menilai tangga penyajian §23 SESUDAH contoh dan latihan
   # ada — tanpa keduanya tidak ada yang dapat dinilai tentang contoh dan
@@ -92,7 +92,8 @@ rag:
 # -----------------------------------------------------------------------------
 latex:
   enabled: true
-  engine: latexmk            # bukan pdflatex langsung: latexmk tahu berapa kali harus diulang
+  engine: pdflatex           # 3× pdflatex + bibtex di antaranya; `latexmk` juga boleh, tapi ia skrip
+                             # Perl dan mesin tanpa `perl` di PATH tidak dapat menjalankannya
   template_dir: null         # null = pakai latex/templates/ bawaan
   timeout_s: 180             # bab + daftar pustaka pada mesin ini selesai jauh di bawah ini
   keep_aux: false            # .aux/.log adalah turunan; simpan hanya saat menelusuri masalah
@@ -103,6 +104,16 @@ latex:
 graph:
   enabled: true
   max_depth: 8               # batas lintasan penelusuran; graf dari ringkasan bab dapat bersiklus
+
+# -----------------------------------------------------------------------------
+# Catatan panggilan model (§38)
+# -----------------------------------------------------------------------------
+# Satu berkas JSONL per peran di `output/logs/`, mis. `writer.jsonl`. Yang
+# membacanya adalah `ai-book compare` (§33): membandingkan model untuk satu peran
+# menuntut angka yang benar-benar tercatat, bukan kesan tentang nama modelnya.
+logging:
+  enabled: true
+  output_chars: 4000         # potongan keluaran yang disimpan apa adanya; 0 = angka saja
 
 # -----------------------------------------------------------------------------
 # Pemetaan peran → model (blueprint §6). Agent memanggil router.chat("writer"),
